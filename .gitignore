@@ -1,0 +1,9 @@
+.pio/
+managed_components/
+include/Secrets.h
+mic_capture.wav
+__pycache__/
+desk-pet-eyes2/
+lib/VoxieAudio/AudioAssets.bin
+sdkconfig.*
+src/main.cpp.bak

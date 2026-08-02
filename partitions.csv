@@ -1,0 +1,13 @@
+# Name,     Type, SubType,  Offset,   Size,  Flags
+# ESP-SR's WakeNet/AFE models need considerably more flash than the default
+# ESP-IDF 1MB app partition allows - this uses more of this board's actual
+# 8MB flash instead. No OTA (single "factory" app slot); this project has no
+# over-the-air update path.
+nvs,        data, nvs,      0x9000,   0x6000,
+phy_init,   data, phy,      0xf000,   0x1000,
+factory,    app,  factory,  0x10000,  0x600000,
+coredump,   data, coredump, 0x610000, 0x10000,
+# ESP-SR's WakeNet/AFE model data - esp-sr's own build step packs and
+# flashes this automatically (movemodel.py, hooked into the "flash" target)
+# as long as a partition literally named "model" exists.
+model,      data, spiffs,   0x620000, 0x96000,

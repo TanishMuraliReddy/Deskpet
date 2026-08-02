@@ -1,0 +1,387 @@
+<title>Voxie Control Panel</title>
+<style>
+  :root {
+    --bg: #0a1210;
+    --panel: #0f1c19;
+    --panel-2: #0c1613;
+    --grid: #1c2e29;
+    --trace: #5eead4;
+    --trace-fill: rgba(94, 234, 212, 0.16);
+    --peak: #fbbf24;
+    --danger: #f87171;
+    --text: #dcece6;
+    --text-dim: #6b8a80;
+    --text-dimmer: #3f5951;
+    --border: #1c2e29;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 28px 16px 60px;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .head-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .status-row { display: flex; align-items: center; gap: 10px; }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text-dimmer);
+    flex: none;
+  }
+  .status-dot.on { background: var(--trace); box-shadow: 0 0 6px var(--trace); }
+  .status-text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-dim); }
+
+  button {
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 4px;
+    border: 1px solid var(--trace);
+    background: transparent;
+    color: var(--trace);
+    padding: 9px 16px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+  }
+  button:hover:not(:disabled) { background: var(--trace); color: #06201b; }
+  button:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.danger { border-color: var(--danger); color: var(--danger); }
+  button.danger:hover:not(:disabled) { background: var(--danger); color: #2a0a0a; }
+  button.ghost { border-color: var(--border); color: var(--text-dim); }
+  button.ghost:hover:not(:disabled) { background: var(--panel-2); color: var(--text); }
+
+  .actions { padding: 18px 20px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .actions button { width: 100%; padding: 12px 14px; text-align: left; }
+  .actions .cmd-label { display: block; font-size: 13px; }
+  .actions .cmd-hint { display: block; font-size: 10.5px; font-weight: 400; color: var(--text-dim); margin-top: 2px; letter-spacing: 0.02em; }
+  button:hover:not(:disabled) .cmd-hint { color: #06201bcc; }
+
+  .face-gallery { padding: 16px 20px 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .face-gallery button { text-align: center; padding: 12px 6px; border-color: var(--border); color: var(--text); background: var(--panel-2); }
+  .face-gallery button:hover:not(:disabled), .face-gallery button.active { border-color: var(--trace); background: rgba(94,234,212,.12); color: var(--trace); }
+  .face-note { padding: 0 20px 14px; font-size: 11.5px; color: var(--text-dim); }
+
+  .meters { padding: 16px 20px 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); margin-top: 0; border-top: 1px solid var(--border); }
+  .meter { background: var(--panel-2); padding: 12px 14px 13px; }
+  .meter-label { font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dimmer); margin-bottom: 6px; }
+  .meter-value { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; font-size: 16px; }
+  .meter-value.music-yes { color: var(--trace); }
+  .bar-track { margin-top: 8px; height: 4px; background: var(--grid); border-radius: 2px; overflow: hidden; }
+  .bar-fill { height: 100%; width: 0%; background: var(--trace); transition: width 0.15s ease; }
+
+  .chat-row { display: flex; gap: 10px; padding: 16px 20px; }
+  .chat-row input[type="text"] {
+    flex: 1;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 13px;
+  }
+  .chat-row input[type="text"]:focus { outline: 2px solid var(--trace); outline-offset: -1px; }
+  .chat-row input[type="text"]::placeholder { color: var(--text-dimmer); }
+
+  .log-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px 10px; }
+  .log-title { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); }
+  #log {
+    height: 260px;
+    overflow-y: auto;
+    padding: 0 20px 16px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #log .line { color: var(--text-dim); }
+  #log .line.you { color: var(--peak); }
+  #log .line.err { color: var(--danger); }
+  #log .line.sys { color: var(--trace); }
+
+  .footer-note { padding: 4px 4px 0; font-size: 11.5px; line-height: 1.5; color: var(--text-dim); }
+  .footer-note b { color: var(--text); font-weight: 600; }
+
+  .empty-state { padding: 40px 20px; text-align: center; color: var(--text-dim); font-size: 13px; line-height: 1.6; }
+  .empty-state b { color: var(--text); }
+
+  @media (max-width: 480px) {
+    .actions { grid-template-columns: 1fr; }
+    .meters { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="wrap">
+  <div class="card">
+    <div class="head">
+      <div class="head-title">Voxie Control Panel</div>
+      <div class="status-row">
+        <span class="status-dot" id="statusDot"></span>
+        <span class="status-text" id="statusText">Not connected</span>
+      </div>
+    </div>
+    <div id="connectArea" class="actions" style="grid-template-columns: 1fr;">
+      <button id="connectBtn">Connect to board&hellip;</button>
+    </div>
+    <p class="footer-note" style="padding: 0 20px 18px;">Uses the Web Serial API (Chrome/Edge only) to talk to the board directly at 230400 baud - no separate app needed. Clicking Connect opens your browser's own port picker.</p>
+  </div>
+
+  <div class="card" id="mainCard" style="display: none;">
+    <div class="actions">
+      <button id="btnTip">
+        <span class="cmd-label">Simulate tip-over</span>
+        <span class="cmd-hint">sends 't' - toggles disgruntled/angry</span>
+      </button>
+      <button id="btnNoise">
+        <span class="cmd-label">Simulate loud noise</span>
+        <span class="cmd-hint">sends 'n' - scared/angry reaction</span>
+      </button>
+      <button id="btnMicDebug">
+        <span class="cmd-label">Mic debug: <span id="micDebugState">off</span></span>
+        <span class="cmd-hint">sends 'm' - live peak/floor/music prints</span>
+      </button>
+      <button id="btnClearLog" class="ghost">
+        <span class="cmd-label">Clear log</span>
+        <span class="cmd-hint">local only, doesn't touch the board</span>
+      </button>
+    </div>
+
+    <div class="meters" style="grid-template-columns: 1fr;">
+      <div class="meter" style="display: flex; align-items: center; justify-content: space-between;">
+        <div>
+          <div class="meter-label">Pet state</div>
+          <div class="meter-value" id="petState" style="font-size: 18px;">&mdash;</div>
+        </div>
+        <div class="status-text" id="lastEvent" style="text-align: right; max-width: 60%;"></div>
+      </div>
+    </div>
+
+    <div class="meters">
+      <div class="meter">
+        <div class="meter-label">Mic peak</div>
+        <div class="meter-value" id="mPeak">&mdash;</div>
+        <div class="bar-track"><div class="bar-fill" id="mPeakBar"></div></div>
+      </div>
+      <div class="meter">
+        <div class="meter-label">Noise floor</div>
+        <div class="meter-value" id="mFloor">&mdash;</div>
+        <div class="bar-track"><div class="bar-fill" id="mFloorBar" style="background: var(--text-dimmer);"></div></div>
+      </div>
+      <div class="meter">
+        <div class="meter-label">Music</div>
+        <div class="meter-value" id="mMusic">&mdash;</div>
+        <div class="meter-label" id="mBpm" style="margin-top: 6px; text-transform: none; letter-spacing: 0; font-size: 11px;">&nbsp;</div>
+      </div>
+    </div>
+
+    <div class="chat-row">
+      <input type="text" id="chatInput" placeholder="Type anything + Enter to talk to it&hellip;" autocomplete="off" />
+      <button id="btnSend">Send</button>
+    </div>
+
+    <div class="log-head">
+      <span class="log-title">Serial Log</span>
+      <span class="status-text" id="portInfo"></span>
+    </div>
+    <div id="log"><div class="line sys">Connected. Waiting for output&hellip;</div></div>
+  </div>
+
+  <div class="card" id="galleryCard" style="display: none;">
+    <div class="head"><div class="head-title">Face Gallery</div><div class="status-text">physical OLED preview</div></div>
+    <div class="face-note">Choose an expression to show it on Voxie for 30 seconds. Watch the real OLED, then select another.</div>
+    <div class="face-gallery" id="faceGallery">
+      <button data-face="neutral">Neutral</button><button data-face="happy">Happy</button><button data-face="sad">Sad</button>
+      <button data-face="angry">Angry</button><button data-face="disgruntled">Disgruntled</button><button data-face="surprised">Surprised</button>
+      <button data-face="sleepy">Sleepy</button><button data-face="sleeping">Sleeping</button><button data-face="suspicious">Suspicious</button>
+      <button data-face="adoring">Adoring</button><button data-face="scared">Scared</button>
+    </div>
+  </div>
+
+  <div class="card" id="unsupportedCard" style="display: none;">
+    <div class="empty-state">
+      <b>Web Serial isn't available in this browser.</b><br />
+      Open this page in Chrome or Edge on desktop, then click Connect. Firefox and Safari don't support Web Serial yet.
+    </div>
+  </div>
+</div>
+
+<script>
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const connectBtn = document.getElementById('connectBtn');
+const connectArea = document.getElementById('connectArea');
+const mainCard = document.getElementById('mainCard');
+const galleryCard = document.getElementById('galleryCard');
+const unsupportedCard = document.getElementById('unsupportedCard');
+const logEl = document.getElementById('log');
+const portInfo = document.getElementById('portInfo');
+const chatInput = document.getElementById('chatInput');
+
+let port, writer, reader, readableStreamClosed;
+let keepReading = false;
+let micDebugOn = false;
+
+function appendLog(text, cls) {
+  const div = document.createElement('div');
+  div.className = 'line' + (cls ? ' ' + cls : '');
+  div.textContent = text;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+  while (logEl.children.length > 500) logEl.removeChild(logEl.firstChild);
+}
+
+function setConnected(on) {
+  statusDot.classList.toggle('on', on);
+  statusText.textContent = on ? 'Connected @ 230400 baud' : 'Not connected';
+  connectArea.style.display = on ? 'none' : 'grid';
+  mainCard.style.display = on ? 'block' : 'none';
+  galleryCard.style.display = on ? 'block' : 'none';
+}
+
+async function sendLine(cmd) {
+  if (!writer) return;
+  appendLog('> ' + cmd, 'you');
+  const encoder = new TextEncoder();
+  await writer.write(encoder.encode(cmd + '\n'));
+}
+
+function updateMeters(peak, floor, musicOn, bpm) {
+  document.getElementById('mPeak').textContent = peak.toLocaleString();
+  document.getElementById('mFloor').textContent = Math.round(floor).toLocaleString();
+  const musicEl = document.getElementById('mMusic');
+  musicEl.textContent = musicOn ? 'yes' : 'no';
+  musicEl.className = 'meter-value' + (musicOn ? ' music-yes' : '');
+  document.getElementById('mBpm').textContent = musicOn ? (bpm + ' BPM') : ' ';
+
+  const scale = 900000; // rough ceiling for this mic's raw amplitude scale
+  document.getElementById('mPeakBar').style.width = Math.min(100, (peak / scale) * 100) + '%';
+  document.getElementById('mFloorBar').style.width = Math.min(100, (floor / scale) * 100) + '%';
+}
+
+function handleLine(line) {
+  if (!line) return;
+  const m = line.match(/^mic peak=(-?\d+) floor=([\d.]+) music=(yes|no) bpm=([\d.]+)/);
+  if (m) {
+    updateMeters(parseInt(m[1], 10), parseFloat(m[2]), m[3] === 'yes', Math.round(parseFloat(m[4])));
+  }
+  if (line.includes('mic debug on')) micDebugOn = true;
+  if (line.includes('mic debug off')) micDebugOn = false;
+  document.getElementById('micDebugState').textContent = micDebugOn ? 'on' : 'off';
+
+  let cls;
+  if (line.startsWith('[event]')) {
+    cls = 'you';
+    document.getElementById('lastEvent').textContent = line.replace('[event] ', '');
+  } else if (line.startsWith('[state]')) {
+    cls = 'sys';
+    const stateText = line.replace('[state] ', '');
+    document.getElementById('petState').textContent = stateText;
+    if (stateText.startsWith('fell asleep')) {
+      document.getElementById('petState').textContent = 'asleep';
+    } else if (stateText.startsWith('back to normal')) {
+      const m = stateText.match(/\(([^)]+)\)/);
+      document.getElementById('petState').textContent = m ? m[1] : 'idle';
+    }
+  }
+  appendLog(line, cls);
+}
+
+async function readLoop() {
+  let buffer = '';
+  while (keepReading) {
+    try {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const l of lines) handleLine(l.replace('\r', '').trim());
+    } catch (err) {
+      appendLog('Read error: ' + err.message, 'err');
+      break;
+    }
+  }
+}
+
+async function connect() {
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 230400 });
+    writer = port.writable.getWriter();
+
+    const textDecoder = new TextDecoderStream();
+    readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+    reader = textDecoder.readable.getReader();
+
+    keepReading = true;
+    setConnected(true);
+    const info = port.getInfo ? port.getInfo() : {};
+    portInfo.textContent = info.usbVendorId ? `VID ${info.usbVendorId.toString(16)}` : '';
+    readLoop();
+  } catch (err) {
+    appendLog('Connection failed: ' + err.message, 'err');
+  }
+}
+
+async function disconnect() {
+  keepReading = false;
+  try { await reader.cancel(); } catch (e) {}
+  try { await readableStreamClosed.catch(() => {}); } catch (e) {}
+  try { writer.releaseLock(); } catch (e) {}
+  try { await port.close(); } catch (e) {}
+  setConnected(false);
+}
+
+connectBtn.addEventListener('click', connect);
+
+document.getElementById('btnTip').addEventListener('click', () => sendLine('t'));
+document.getElementById('btnNoise').addEventListener('click', () => sendLine('n'));
+document.getElementById('btnMicDebug').addEventListener('click', () => sendLine('m'));
+document.getElementById('btnClearLog').addEventListener('click', () => { logEl.innerHTML = ''; });
+document.querySelectorAll('#faceGallery button').forEach((button) => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('#faceGallery button').forEach((item) => item.classList.remove('active'));
+    button.classList.add('active');
+    sendLine('face ' + button.dataset.face);
+  });
+});
+document.getElementById('btnSend').addEventListener('click', () => {
+  const text = chatInput.value.trim();
+  if (!text) return;
+  sendLine(text);
+  chatInput.value = '';
+});
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('btnSend').click();
+});
+
+if (!('serial' in navigator)) {
+  unsupportedCard.style.display = 'block';
+  connectBtn.disabled = true;
+}
+</script>
