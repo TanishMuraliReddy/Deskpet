@@ -6,6 +6,7 @@
 #include "PetBrain.h"
 #include "PetInputs.h"
 #include "PetMind.h"
+#include "BeatDetector.h"
 
 // 1.5 in SH1107 128x128 OLED, four-wire SPI.
 #define OLED_CLK  12
@@ -42,8 +43,26 @@ RoboFace face(&gfx, PANEL_W, PANEL_H);
 PetMind mind;
 PetBrain brain(face, mind);
 PetInputs inputs(TOUCH_PIN, MIC_SCK, MIC_WS, MIC_SD);
+BeatDetector beat;
 
 bool wasTipped = false;
+bool wasMusicPlaying = false;
+bool danceLeft = false;
+
+void drawVibeOverlay() {
+    // Compact corner label and a small equalizer along the lower edge. The
+    // face itself keeps animating, so the overlay reads as a dance mode—not
+    // a separate static screen.
+    oled.setDrawColor(1);
+    oled.setFont(u8g2_font_5x7_tf);
+    oled.drawStr(3, 8, "VIBE");
+    const uint8_t bars[] = {5, 10, 16, 10, 5};
+    const int beatBoost = beat.beatEdge() ? 5 : 0;
+    for (uint8_t i = 0; i < 5; ++i) {
+        const int height = bars[i] + beatBoost;
+        oled.drawBox(48 + i * 7, 124 - height, 4, height);
+    }
+}
 
 void handleSerial() {
     if (!Serial.available()) return;
@@ -77,7 +96,24 @@ void loop() {
     const bool tipped = inputs.tippedOver();
     brain.notifyTipped(tipped);
     wasTipped = tipped;
-    if (inputs.loudNoiseEdge()) {
+
+    // Feed the beat detector before deciding that a peak is a scary sound.
+    // A regular run of peaks becomes dance mode; irregular spikes still
+    // trigger the normal startled reaction.
+    if (inputs.rawSampleCount() > 0) beat.update(inputs.lastPeak());
+    brain.notifyMusicPlaying(beat.isMusicDetected());
+    if (beat.isMusicDetected() != wasMusicPlaying) {
+        Serial.printf("[music] %s\n", beat.isMusicDetected() ? "vibe mode on" : "vibe mode off");
+        wasMusicPlaying = beat.isMusicDetected();
+    }
+    if (beat.beatEdge()) {
+        brain.notifyMusicBeat();
+        danceLeft = !danceLeft;
+        face.lookAt(danceLeft ? -0.75f : 0.75f, -0.10f, 180);
+        Serial.printf("[music] beat %.0f BPM\n", beat.bpm());
+    }
+
+    if (inputs.loudNoiseEdge() && !beat.isMusicDetected()) {
         Serial.printf("[event] loud noise (peak=%ld)\n", (long)inputs.lastPeak());
         brain.notifyLoudNoise();
     }
@@ -86,6 +122,7 @@ void loop() {
 
     oled.clearBuffer();
     face.update();
+    if (beat.isMusicDetected()) drawVibeOverlay();
     oled.sendBuffer();
     delay(20); // stable 50 FPS with autonomous blink and gaze
 }
