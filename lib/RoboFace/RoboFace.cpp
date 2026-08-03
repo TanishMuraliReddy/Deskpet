@@ -101,7 +101,7 @@ constexpr float kEyeDroopRange = 16.0f;
 constexpr float kMouthBaseWidth = 58.0f;
 constexpr float kMouthCurveAmplitude = 15.0f;
 constexpr float kMouthOpenMaxHeight = 26.0f;
-constexpr float kLookRangeX = 5.0f;
+constexpr float kLookRangeX = 8.0f;
 constexpr float kLookRangeY = 5.0f;
 
 } // namespace
@@ -125,7 +125,7 @@ RoboFace::RoboFace(Adafruit_GFX* gfx, int16_t width, int16_t height)
 void RoboFace::begin() {
     _lastUpdateMs = millis();
     _nextBlinkAtMs = _lastUpdateMs + random(2000, 6000);
-    _nextSaccadeAtMs = _lastUpdateMs + random(1200, 3500);
+    _nextSaccadeAtMs = _lastUpdateMs + random(900, 1900);
     render();
 }
 
@@ -199,9 +199,12 @@ void RoboFace::tick(float dtSeconds) {
 
     // Gaze: autonomous saccades unless a manual lookAt() is still holding
     if (_autonomous && now >= _manualLookUntilMs && now >= _nextSaccadeAtMs) {
-        _lookTargetX = (random(-100, 101) / 100.0f);
-        _lookTargetY = (random(-100, 101) / 100.0f) * 0.6f; // eyes move less vertically
-        _nextSaccadeAtMs = now + random(1200, 3500);
+        // Avoid tiny near-center target changes: they existed, but were too
+        // subtle to read as a living idle glance on the small OLED.
+        const float side = random(0, 2) ? 1.0f : -1.0f;
+        _lookTargetX = side * (random(55, 101) / 100.0f);
+        _lookTargetY = (random(-35, 36) / 100.0f);
+        _nextSaccadeAtMs = now + random(900, 1900);
     }
     float lookRate = clampf(dtSeconds * 6.0f, 0.0f, 1.0f);
     _lookX = lerp(_lookX, _lookTargetX, lookRate);
