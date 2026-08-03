@@ -48,6 +48,7 @@ BeatDetector beat;
 bool wasTipped = false;
 bool wasMusicPlaying = false;
 bool danceLeft = false;
+bool micDebug = false;
 
 void drawVibeOverlay() {
     // Compact corner label and a small equalizer along the lower edge. The
@@ -71,6 +72,11 @@ void handleSerial() {
     if (line == "t") { brain.notifyTouched(); return; }
     if (line == "n") { brain.notifyLoudNoise(); return; }
     if (line == "T") { inputs.simulateToggleTip(); return; }
+    if (line == "m") {
+        micDebug = !micDebug;
+        Serial.printf("[mic] debug %s\n", micDebug ? "on" : "off");
+        return;
+    }
     if (line.length()) {
         PetReply reply = mind.respond(line);
         Serial.println(reply.spoken);
@@ -116,6 +122,15 @@ void loop() {
     if (inputs.loudNoiseEdge() && !beat.isMusicDetected()) {
         Serial.printf("[event] loud noise (peak=%ld)\n", (long)inputs.lastPeak());
         brain.notifyLoudNoise();
+    }
+    if (micDebug) {
+        static uint32_t lastMicReport = 0;
+        if (millis() - lastMicReport >= 500) {
+            lastMicReport = millis();
+            Serial.printf("[mic] peak=%ld floor=%.0f music=%s bpm=%.0f\n",
+                          (long)inputs.lastPeak(), inputs.noiseFloor(),
+                          beat.isMusicDetected() ? "yes" : "no", beat.bpm());
+        }
     }
     handleSerial();
     brain.update();
