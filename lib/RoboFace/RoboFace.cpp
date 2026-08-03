@@ -252,7 +252,11 @@ void RoboFace::render() {
         }
     }
 
-    drawMouth(cx + (int16_t)(lookOffX * 0.3f), (int16_t)(cy + 38), _eyeColor);
+    // The reference Sad face places its large frown slightly closer to the
+    // eyes than the other expressions.
+    const bool isSad = _current.lidSlant < -0.86f && _current.eyeHeight > 1.10f;
+    int16_t mouthY = isSad ? (int16_t)(cy + 34) : (int16_t)(cy + 38);
+    drawMouth(cx + (int16_t)(lookOffX * 0.3f), mouthY, _eyeColor);
 
     if (_current.sleeping) {
         drawSleepZs(rightX + 4, eyeY - 26, _eyeColor);
@@ -265,6 +269,14 @@ void RoboFace::render() {
 void RoboFace::drawEye(int16_t centerX, int16_t centerY, bool isLeftEye,
                         float openness, uint16_t color) const {
     float w = kBaseEyeW * _current.eyeWidth;
+
+    // Generic corner masks made the old Sad expression look too close to a
+    // normal rounded eye.  Draw the reference's unmistakable teardrop shape
+    // directly once the Sad transition has reached its target geometry.
+    if (_current.lidSlant < -0.86f && _current.eyeHeight > 1.10f && openness > 0.45f) {
+        drawSadEye(centerX, centerY, isLeftEye, color);
+        return;
+    }
 
     // Nearly/fully shut (blink trough, SLEEPY, SLEEPING) reads as a soft
     // curved line far better than a squashed box - closer to how a real
@@ -312,6 +324,28 @@ void RoboFace::drawEye(int16_t centerX, int16_t centerY, bool isLeftEye,
         int16_t triX = maskLeftCorner ? x : (int16_t)(x + w);
         cutTopCorner(triX, y, w, dropH, 0.6f, maskLeftCorner);
     }
+}
+
+void RoboFace::drawSadEye(int16_t centerX, int16_t centerY, bool isLeftEye,
+                           uint16_t color) const {
+    // Polygon is clockwise for the left eye.  The high point is on the
+    // inside edge; mirror all x coordinates for the right eye.  A high point
+    // plus the rounded lower half creates the soft shield/teardrop seen in
+    // the supplied reference, rather than a slanted rectangle.
+    const int16_t direction = isLeftEye ? 1 : -1;
+    const int16_t offsets[][2] = {
+        {-20, -12}, {-2, -27}, {10, -22}, {18, -12},
+        {21,   1}, {21,  13}, {15,  23}, {5,  27},
+        {-7,  27}, {-16, 21}, {-21, 12}, {-22,  1}
+    };
+    constexpr uint8_t kPoints = sizeof(offsets) / sizeof(offsets[0]);
+    int16_t px[kPoints];
+    int16_t py[kPoints];
+    for (uint8_t i = 0; i < kPoints; ++i) {
+        px[i] = centerX + offsets[i][0] * direction;
+        py[i] = centerY + offsets[i][1];
+    }
+    fillPolygon(px, py, kPoints, color);
 }
 
 void RoboFace::drawEyeArc(int16_t centerX, int16_t centerY, float halfWidth,

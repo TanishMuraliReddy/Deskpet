@@ -113,6 +113,11 @@ private:
 
     void drawEye(int16_t centerX, int16_t centerY, bool isLeftEye,
                  float openness, uint16_t color) const;
+    // Dedicated, rounded teardrop eye used by the Sad expression.  This is
+    // intentionally separate from the generic lid-mask eye so Sad keeps its
+    // distinctive inward-pointing silhouette on the small OLED.
+    void drawSadEye(int16_t centerX, int16_t centerY, bool isLeftEye,
+                     uint16_t color) const;
     // Soft closed-eye curve used when an eye is nearly/fully shut (blink,
     // SLEEPY, SLEEPING): bend>0 arches upward ("^_^"), bend<0 droops (sad).
     void drawEyeArc(int16_t centerX, int16_t centerY, float halfWidth,

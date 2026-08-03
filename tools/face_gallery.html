@@ -13,7 +13,7 @@
 <div class="grid" id="grid"></div><p class="note">These are rendered from the same face settings used in the firmware; the actual monochrome OLED will look crisper.</p>
 </main><script>
 const faces={
-  Neutral:[1,1,1,0,0,0,0,0,.6], Happy:[.98,.20,1,.03,0,.82,.36,0,.72], Sad:[1.10,1.18,1,-.42,-.92,0,-.92,0,1.06],
+  Neutral:[1,1,1,0,0,0,0,0,.6], Happy:[.98,.20,1,.03,0,.82,.36,0,.72], Sad:[1.10,1.18,1,-.42,-.92,0,-.92,0,1.06,'sad'],
   Angry:[.9,.75,.85,0,.9,.15,-.4,0,.45], Disgruntled:[.9,.7,.95,.15,.45,.35,-.3,0,.4],
   Surprised:[1.15,1.25,1.05,-.15,0,0,0,.85,.4], Sleepy:[.9,.25,1,.4,0,.2,-.1,0,.45],
   Sleeping:[1,.14,1,.1,0,0,0,.35,.19,'sleep'], Suspicious:[.85,.5,.7,.05,.3,.4,-.2,0,.4],
@@ -23,8 +23,8 @@ function curve(ctx,x,y,w,amp){ctx.beginPath();ctx.moveTo(x-w/2,y);ctx.quadraticC
 function draw(canvas,p,large=false){const s=large?3:2,ctx=canvas.getContext('2d');canvas.width=128*s;canvas.height=128*s;ctx.scale(s,s);ctx.fillStyle='#000';ctx.fillRect(0,0,128,128);ctx.strokeStyle=ctx.fillStyle='#fff';ctx.lineCap='round';ctx.lineJoin='round';
  const [ew,eh,es,droop,slant,squint,smile,open,mw,special]=p,cx=64,cy=56+droop*16,dx=28*es,w=36*ew,h=42*eh;
  for(const side of[-1,1]){let x=cx+side*dx;if(special==='heart'){ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(x,cy+11);ctx.bezierCurveTo(x-26,cy-5,x-8,cy-20,x,cy-8);ctx.bezierCurveTo(x+8,cy-20,x+26,cy-5,x,cy+11);ctx.fill();continue}
-  if(h<13){ctx.lineWidth=5;curve(ctx,x,cy,w*.8,4);continue} ctx.fillStyle='#fff';ctx.beginPath();ctx.roundRect(x-w/2,cy-h/2,w,h,Math.min(13,w*.48,h*.48));ctx.fill();
-  if(Math.abs(slant)>0.05||squint>.05){ctx.fillStyle='#000';ctx.beginPath();const tilt=slant*12*side;ctx.moveTo(x-w/2-2,cy-h/2-3);ctx.lineTo(x+w/2+2,cy-h/2-3);ctx.lineTo(x+w/2+2,cy-h/2+Math.max(3,squint*18)+tilt);ctx.lineTo(x-w/2-2,cy-h/2+Math.max(3,squint*18)-tilt);ctx.fill()}
+  if(h<13){ctx.lineWidth=5;curve(ctx,x,cy,w*.8,4);continue} ctx.fillStyle='#fff';ctx.beginPath();if(special==='sad'){const d=side===-1?1:-1;const q=(dx,dy)=>[x+dx*d,cy+dy];const a=[q(-20,-12),q(-2,-27),q(10,-22),q(18,-12),q(21,1),q(21,13),q(15,23),q(5,27),q(-7,27),q(-16,21),q(-21,12),q(-22,1)];ctx.moveTo(...a[0]);for(let i=1;i<a.length;i++)ctx.lineTo(...a[i]);ctx.closePath()}else ctx.roundRect(x-w/2,cy-h/2,w,h,Math.min(13,w*.48,h*.48));ctx.fill();
+  if(special!=='sad'&&(Math.abs(slant)>0.05||squint>.05)){ctx.fillStyle='#000';ctx.beginPath();const tilt=slant*12*side;ctx.moveTo(x-w/2-2,cy-h/2-3);ctx.lineTo(x+w/2+2,cy-h/2-3);ctx.lineTo(x+w/2+2,cy-h/2+Math.max(3,squint*18)+tilt);ctx.lineTo(x-w/2-2,cy-h/2+Math.max(3,squint*18)-tilt);ctx.fill()}
   if(special==='brow'){ctx.strokeStyle='#fff';ctx.lineWidth=3;curve(ctx,x,cy-h/2-8,w*.65,side*5);ctx.strokeStyle='#fff'} }
  const my=102;if(special==='sleep'){ctx.lineWidth=3;ctx.beginPath();ctx.arc(cx,my,7,0,Math.PI*2);ctx.stroke();ctx.font='13px system-ui';ctx.fillStyle='#fff';ctx.fillText('Z Z Z',85,28);return}
  if(open>.1){ctx.lineWidth=4;ctx.beginPath();ctx.ellipse(cx,my,Math.max(5,mw*58/2),Math.max(4,open*13),0,0,Math.PI*2);ctx.stroke()}else{ctx.lineWidth=4;curve(ctx,cx,my,mw*58,smile*15)} }
