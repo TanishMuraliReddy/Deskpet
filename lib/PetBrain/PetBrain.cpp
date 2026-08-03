@@ -9,6 +9,7 @@ PetBrain::PetBrain(RoboFace& face, PetMind& mind)
       _touchedUntilMs(0),
       _attentiveUntilMs(0),
       _jamming(false), _mouthPulseUntilMs(0), _musicBeatUntilMs(0),
+      _previewExpression(Expression::NEUTRAL), _previewUntilMs(0),
       _answerUntilMs(0), _dataRevealAtMs(0), _isDataAnswer(false),
       _lastApplied(Expression::NEUTRAL), _hasApplied(false) {}
 
@@ -110,6 +111,12 @@ void PetBrain::notifyMusicBeat() {
     _lastActivityMs = millis();
 }
 
+void PetBrain::previewExpression(Expression expression, uint32_t durationMs) {
+    _previewExpression = expression;
+    _previewUntilMs = millis() + durationMs;
+    _lastActivityMs = millis();
+}
+
 bool PetBrain::isAnswering() const { return millis() < _answerUntilMs; }
 
 const String& PetBrain::currentMessage() const { return _message; }
@@ -131,6 +138,11 @@ void PetBrain::update() {
     // (tipped/noise/touched/answering) preempting a jam can't leave the
     // mouth stuck mid-pulse instead of showing that reaction's own mouth.
     _face.setMouthOverride(false);
+
+    if (now < _previewUntilMs) {
+        applyExpression(_previewExpression, 0.01f);
+        return;
+    }
 
     if (_tipped) {
         applyExpression(_recentTipCount >= 3 ? Expression::ANGRY : Expression::DISGRUNTLED, 0.25f);

@@ -74,6 +74,38 @@ void drawVibeOverlay() {
     oled.drawHLine(rightX - 3, 18 + lift, 6);
 }
 
+bool previewFace(const String& requested) {
+    struct FaceCommand { const char* name; Expression expression; };
+    static const FaceCommand faces[] = {
+        {"neutral", Expression::NEUTRAL}, {"happy", Expression::HAPPY},
+        {"sad", Expression::SAD}, {"angry", Expression::ANGRY},
+        {"disgruntled", Expression::DISGRUNTLED}, {"surprised", Expression::SURPRISED},
+        {"sleepy", Expression::SLEEPY}, {"sleeping", Expression::SLEEPING},
+        {"suspicious", Expression::SUSPICIOUS}, {"adoring", Expression::ADORING},
+        {"scared", Expression::SCARED}, {"vibe", Expression::VIBING},
+        {"vibe_active", Expression::VIBING_ACTIVE},
+    };
+    String name = requested;
+    name.trim();
+    name.toLowerCase();
+    static uint8_t nextFace = 0;
+    if (name.length() == 0 || name == "next") {
+        const FaceCommand& choice = faces[nextFace++ % (sizeof(faces) / sizeof(faces[0]))];
+        brain.previewExpression(choice.expression);
+        Serial.printf("[face] %s for 10 seconds\n", choice.name);
+        return true;
+    }
+    for (const auto& choice : faces) {
+        if (name == choice.name) {
+            brain.previewExpression(choice.expression);
+            Serial.printf("[face] %s for 10 seconds\n", choice.name);
+            return true;
+        }
+    }
+    Serial.println("[face] use: face [neutral|happy|sad|angry|disgruntled|surprised|sleepy|sleeping|suspicious|adoring|scared|vibe|vibe_active]");
+    return false;
+}
+
 void handleSerial() {
     if (!Serial.available()) return;
     String line = Serial.readStringUntil('\n');
@@ -84,6 +116,10 @@ void handleSerial() {
     if (line == "m") {
         micDebug = !micDebug;
         Serial.printf("[mic] debug %s\n", micDebug ? "on" : "off");
+        return;
+    }
+    if (line == "face" || line.startsWith("face ")) {
+        previewFace(line.length() > 4 ? line.substring(5) : "");
         return;
     }
     if (line.length()) {

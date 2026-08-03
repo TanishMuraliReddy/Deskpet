@@ -42,6 +42,10 @@ public:
     void notifyMusicPlaying(bool playing);
     void notifyMusicBeat();
 
+    // Serial/UI preview: immediately hold an expression for a short review
+    // period, then return to normal sensor-driven behavior.
+    void previewExpression(Expression expression, uint32_t durationMs = 10000);
+
     // Chat-kind replies (greetings, praise, name, stats, ...): show the face
     // with a short caption underneath.
     bool isAnswering() const;
@@ -101,6 +105,8 @@ private:
     bool _jamming;
     uint32_t _mouthPulseUntilMs;
     uint32_t _musicBeatUntilMs;
+    Expression _previewExpression;
+    uint32_t _previewUntilMs;
     // Answering (chat or data). _dataRevealAtMs is when the blink-close
     // finishes and the data screen may actually appear; for chat replies
     // it equals _answerUntilMs's start (shows immediately).
