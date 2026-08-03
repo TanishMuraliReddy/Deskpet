@@ -8,7 +8,7 @@ PetBrain::PetBrain(RoboFace& face, PetMind& mind)
       _noiseUntilMs(0), _noiseExpr(Expression::SCARED),
       _touchedUntilMs(0),
       _attentiveUntilMs(0),
-      _jamming(false), _mouthPulseUntilMs(0),
+      _jamming(false), _mouthPulseUntilMs(0), _musicBeatUntilMs(0),
       _answerUntilMs(0), _dataRevealAtMs(0), _isDataAnswer(false),
       _lastApplied(Expression::NEUTRAL), _hasApplied(false) {}
 
@@ -106,6 +106,7 @@ void PetBrain::notifyMusicPlaying(bool playing) {
 void PetBrain::notifyMusicBeat() {
     if (!_jamming) return;
     _mouthPulseUntilMs = millis() + 130;
+    _musicBeatUntilMs = millis() + 180;
     _lastActivityMs = millis();
 }
 
@@ -153,7 +154,7 @@ void PetBrain::update() {
         return;
     }
     if (_jamming) {
-        applyExpression(Expression::HAPPY, 0.3f);
+        applyExpression(now < _musicBeatUntilMs ? Expression::VIBING_ACTIVE : Expression::VIBING, 0.10f);
         bool mouthOpen = now < _mouthPulseUntilMs;
         _face.setMouthOverride(true, mouthOpen ? 0.85f : 0.05f);
         return;

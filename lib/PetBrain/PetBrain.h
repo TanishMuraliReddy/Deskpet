@@ -100,6 +100,7 @@ private:
     // snapping back shut between beats via _mouthPulseUntilMs.
     bool _jamming;
     uint32_t _mouthPulseUntilMs;
+    uint32_t _musicBeatUntilMs;
     // Answering (chat or data). _dataRevealAtMs is when the blink-close
     // finishes and the data screen may actually appear; for chat replies
     // it equals _answerUntilMs's start (shows immediately).

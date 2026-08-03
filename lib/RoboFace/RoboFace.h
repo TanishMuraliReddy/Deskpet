@@ -14,6 +14,8 @@ enum class Expression : uint8_t {
     SUSPICIOUS,
     ADORING,     // heart eyes
     SCARED,
+    VIBING,          // relaxed closed-eye groove
+    VIBING_ACTIVE,   // brief wide-eyed beat hit
     EXPRESSION_COUNT
 };
 

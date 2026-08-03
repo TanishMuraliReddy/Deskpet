@@ -60,6 +60,12 @@ FaceParams expressionParams(Expression e) {
             return {1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.7f, 0.0f, 0.7f, true, false, 0.0f};
         case Expression::SCARED:
             return {1.3f, 1.3f, 1.1f, -0.1f, 0.0f, 0.0f, 0.0f, 0.5f, 0.3f, false, false, 0.0f};
+        case Expression::VIBING:
+            // Immersive vibe: relaxed closed ^_^ eyes and a warm smile.
+            return {0.95f, 0.20f, 1.0f, 0.06f, 0.0f, 0.0f, 0.78f, 0.0f, 0.72f, false, false, 0.0f};
+        case Expression::VIBING_ACTIVE:
+            // Active vibe: open, bright eyes for the short beat accent.
+            return {0.98f, 1.06f, 1.0f, -0.03f, 0.0f, 0.16f, 0.52f, 0.0f, 0.72f, false, false, 0.0f};
         case Expression::NEUTRAL:
         default:
             return {1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.6f, false, false, 0.0f};

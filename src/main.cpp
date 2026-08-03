@@ -51,10 +51,20 @@ bool danceLeft = false;
 bool micDebug = false;
 
 void drawVibeOverlay() {
-    // Compact corner label: the face itself supplies the dance animation.
+    // Compact label plus two bouncing note accents. The face itself changes
+    // from a calm groove to bright wide eyes on each confirmed beat.
     oled.setDrawColor(1);
     oled.setFont(u8g2_font_5x7_tf);
     oled.drawStr(3, 8, "VIBE");
+    const int lift = beat.beatEdge() ? 4 : 0;
+    const int leftX = danceLeft ? 10 : 18;
+    const int rightX = danceLeft ? 112 : 104;
+    oled.drawDisc(leftX, 27 - lift, 3);
+    oled.drawVLine(leftX + 3, 14 - lift, 13);
+    oled.drawHLine(leftX + 3, 14 - lift, 7);
+    oled.drawDisc(rightX, 31 + lift, 3);
+    oled.drawVLine(rightX + 3, 18 + lift, 13);
+    oled.drawHLine(rightX - 3, 18 + lift, 6);
 }
 
 void handleSerial() {
