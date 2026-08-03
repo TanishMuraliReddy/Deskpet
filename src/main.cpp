@@ -26,8 +26,8 @@
 // VIBE is intentionally reserved for clearly loud music, not speech or
 // quiet household sounds. These values match the microphone's normalized
 // peak scale printed by the `m` serial-debug command.
-constexpr int32_t kVibeMinimumPeak = 7000;
-constexpr float kVibeMinimumFloor = 3000.0f;
+constexpr int32_t kVibeMinimumPeak = 5000;
+constexpr float kVibeMinimumFloor = 1200.0f;
 
 U8G2_SH1107_PIMORONI_128X128_F_4W_SW_SPI oled(
     U8G2_R0, OLED_CLK, OLED_DATA, OLED_CS, OLED_DC, OLED_RST);
