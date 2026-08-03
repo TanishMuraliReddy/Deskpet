@@ -30,9 +30,13 @@ uint16_t lerpColor565(uint16_t a, uint16_t b, float t) {
 FaceParams expressionParams(Expression e) {
     switch (e) {
         case Expression::HAPPY:
-            return {1.0f, 0.55f, 1.0f, 0.0f, 0.0f, 0.85f, 0.85f, 0.0f, 0.85f, false, false, 0.0f};
+            // A kind, contented expression: soft curved closed eyes and a
+            // shallow smile, rather than a hard squint or an exaggerated grin.
+            return {0.98f, 0.20f, 1.0f, 0.03f, 0.0f, 0.82f, 0.36f, 0.0f, 0.72f, false, false, 0.0f};
         case Expression::SAD:
-            return {0.9f, 0.9f, 1.0f, 0.35f, -0.7f, 0.0f, -0.6f, 0.0f, 0.5f, false, false, 0.0f};
+            // Rounded teardrop eyes: their high points face inward, paired
+            // with a broad, gentle frown rather than a tiny sharp pout.
+            return {0.98f, 1.02f, 1.0f, 0.08f, -0.82f, 0.0f, -0.70f, 0.0f, 0.90f, false, false, 0.0f};
         case Expression::ANGRY:
             return {0.9f, 0.75f, 0.85f, 0.0f, 0.9f, 0.15f, -0.4f, 0.0f, 0.45f, false, false, 0.0f};
         // Teardrop eyes (rounded bottom, gently angled top) with a separate
@@ -470,7 +474,7 @@ void RoboFace::drawMouth(int16_t centerX, int16_t centerY, uint16_t color) const
 
     // Closed mouth: stroke a curve from corner to corner. mouthCurve>0 bows
     // upward at the ends (smile), <0 bows downward at the ends (frown).
-    const uint8_t steps = 28;
+    const uint8_t steps = 36;
     float prevX = centerX - halfWidth, prevY = centerY;
     for (uint8_t i = 1; i <= steps; i++) {
         float tt = i / (float)steps;
