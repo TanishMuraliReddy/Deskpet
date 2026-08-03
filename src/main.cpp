@@ -51,18 +51,10 @@ bool danceLeft = false;
 bool micDebug = false;
 
 void drawVibeOverlay() {
-    // Compact corner label and a small equalizer along the lower edge. The
-    // face itself keeps animating, so the overlay reads as a dance mode—not
-    // a separate static screen.
+    // Compact corner label: the face itself supplies the dance animation.
     oled.setDrawColor(1);
     oled.setFont(u8g2_font_5x7_tf);
     oled.drawStr(3, 8, "VIBE");
-    const uint8_t bars[] = {5, 10, 16, 10, 5};
-    const int beatBoost = beat.beatEdge() ? 5 : 0;
-    for (uint8_t i = 0; i < 5; ++i) {
-        const int height = bars[i] + beatBoost;
-        oled.drawBox(48 + i * 7, 124 - height, 4, height);
-    }
 }
 
 void handleSerial() {
