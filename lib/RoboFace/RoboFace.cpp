@@ -34,9 +34,10 @@ FaceParams expressionParams(Expression e) {
             // shallow smile, rather than a hard squint or an exaggerated grin.
             return {0.98f, 0.20f, 1.0f, 0.03f, 0.0f, 0.82f, 0.36f, 0.0f, 0.72f, false, false, 0.0f};
         case Expression::SAD:
-            // Rounded teardrop eyes: their high points face inward, paired
-            // with a broad, gentle frown rather than a tiny sharp pout.
-            return {0.98f, 1.02f, 1.0f, 0.08f, -0.82f, 0.0f, -0.70f, 0.0f, 0.90f, false, false, 0.0f};
+            // The reference's sad expression has tall, rounded teardrop
+            // eyes with their pointed tops facing inward.  Keep the eyes
+            // high on the screen and make the frown wide and pronounced.
+            return {1.10f, 1.18f, 1.0f, -0.42f, -0.92f, 0.0f, -0.92f, 0.0f, 1.06f, false, false, 0.0f};
         case Expression::ANGRY:
             return {0.9f, 0.75f, 0.85f, 0.0f, 0.9f, 0.15f, -0.4f, 0.0f, 0.45f, false, false, 0.0f};
         // Teardrop eyes (rounded bottom, gently angled top) with a separate
