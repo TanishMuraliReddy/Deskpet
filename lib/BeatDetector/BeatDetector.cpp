@@ -9,6 +9,16 @@ constexpr uint32_t kMinIntervalMs = 240;      // ~250 BPM ceiling
 constexpr uint32_t kMaxIntervalMs = 1400;     // ~43 BPM floor
 }  // namespace
 
+void BeatDetector::reset() {
+    _avgEnergy = 500.0f;
+    _lastOnsetMs = 0;
+    _intervalCount = 0;
+    _intervalIdx = 0;
+    _musicDetected = false;
+    _beatEdge = false;
+    _bpm = 0.0f;
+}
+
 void BeatDetector::update(int32_t amplitude) {
     _beatEdge = false;
     uint32_t now = millis();

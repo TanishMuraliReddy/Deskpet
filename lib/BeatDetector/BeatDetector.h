@@ -14,6 +14,7 @@
 class BeatDetector {
 public:
     void update(int32_t amplitude); // call every loop with the current mic level
+    void reset();                   // discard a rhythm when the signal is not music-loud
 
     bool beatEdge() const { return _beatEdge; }  // true for the one update() a confirmed beat lands on
     bool isMusicDetected() const { return _musicDetected; }

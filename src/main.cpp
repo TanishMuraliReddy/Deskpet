@@ -23,6 +23,12 @@
 #define MIC_SD  15
 #define TOUCH_PIN 1
 
+// VIBE is intentionally reserved for clearly loud music, not speech or
+// quiet household sounds. These values match the microphone's normalized
+// peak scale printed by the `m` serial-debug command.
+constexpr int32_t kVibeMinimumPeak = 7000;
+constexpr float kVibeMinimumFloor = 3000.0f;
+
 U8G2_SH1107_PIMORONI_128X128_F_4W_SW_SPI oled(
     U8G2_R0, OLED_CLK, OLED_DATA, OLED_CS, OLED_DC, OLED_RST);
 
@@ -49,6 +55,7 @@ bool wasTipped = false;
 bool wasMusicPlaying = false;
 bool danceLeft = false;
 bool micDebug = false;
+uint32_t lastLoudMusicCandidateMs = 0;
 
 void drawVibeOverlay() {
     // Compact label plus two bouncing note accents. The face itself changes
@@ -108,7 +115,16 @@ void loop() {
     // Feed the beat detector before deciding that a peak is a scary sound.
     // A regular run of peaks becomes dance mode; irregular spikes still
     // trigger the normal startled reaction.
-    if (inputs.rawSampleCount() > 0) beat.update(inputs.lastPeak());
+    const bool loudMusicCandidate = inputs.lastPeak() >= kVibeMinimumPeak &&
+                                    inputs.noiseFloor() >= kVibeMinimumFloor;
+    if (inputs.rawSampleCount() > 0) {
+        if (loudMusicCandidate) {
+            beat.update(inputs.lastPeak());
+            lastLoudMusicCandidateMs = millis();
+        } else if (millis() - lastLoudMusicCandidateMs > 1800) {
+            beat.reset();
+        }
+    }
     brain.notifyMusicPlaying(beat.isMusicDetected());
     if (beat.isMusicDetected() != wasMusicPlaying) {
         Serial.printf("[music] %s\n", beat.isMusicDetected() ? "vibe mode on" : "vibe mode off");
@@ -121,7 +137,7 @@ void loop() {
         Serial.printf("[music] beat %.0f BPM\n", beat.bpm());
     }
 
-    if (inputs.loudNoiseEdge() && !beat.isMusicDetected()) {
+    if (inputs.loudNoiseEdge() && !beat.isMusicDetected() && !loudMusicCandidate) {
         Serial.printf("[event] loud noise (peak=%ld)\n", (long)inputs.lastPeak());
         brain.notifyLoudNoise();
     }
