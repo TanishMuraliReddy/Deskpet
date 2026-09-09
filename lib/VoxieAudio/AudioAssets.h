@@ -6,21 +6,21 @@ extern "C" const uint8_t VoxieAudioData[];
 
 namespace VoxieAudioAssets {
 struct Clip { size_t offset; size_t size; };
-constexpr Clip Cute1 = {0, 73197};
-constexpr Clip Cute2 = {73197, 73197};
-constexpr Clip No1 = {146394, 25389};
-constexpr Clip No2 = {171783, 25389};
-constexpr Clip No3 = {197172, 25389};
-constexpr Clip Scared1 = {222561, 49581};
-constexpr Clip Scared2 = {272142, 49581};
-constexpr Clip Scared3 = {321723, 49581};
-constexpr Clip Scared4 = {371304, 49581};
-constexpr Clip Shy1 = {420885, 49581};
-constexpr Clip Shy2 = {470466, 25389};
-constexpr Clip Shy3 = {495855, 25389};
-constexpr Clip Shy4 = {521244, 25389};
-constexpr Clip Wakeup1 = {546633, 25389};
-constexpr Clip Wakeup2 = {572022, 25389};
-constexpr Clip Yes1 = {597411, 25389};
-constexpr Clip Yes2 = {622800, 25389};
+constexpr Clip Cute1 = {0, 264600};
+constexpr Clip Cute2 = {264600, 264600};
+constexpr Clip No1 = {529200, 88200};
+constexpr Clip No2 = {617400, 88200};
+constexpr Clip No3 = {705600, 88200};
+constexpr Clip Scared1 = {793800, 176400};
+constexpr Clip Scared2 = {970200, 176400};
+constexpr Clip Scared3 = {1146600, 176400};
+constexpr Clip Scared4 = {1323000, 176400};
+constexpr Clip Shy1 = {1499400, 176400};
+constexpr Clip Shy2 = {1675800, 88200};
+constexpr Clip Shy3 = {1764000, 88200};
+constexpr Clip Shy4 = {1852200, 88200};
+constexpr Clip Wakeup1 = {1940400, 88200};
+constexpr Clip Wakeup2 = {2028600, 88200};
+constexpr Clip Yes1 = {2116800, 88200};
+constexpr Clip Yes2 = {2205000, 88200};
 } // namespace VoxieAudioAssets

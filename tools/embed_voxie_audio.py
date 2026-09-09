@@ -1,9 +1,10 @@
-"""Bundle Voxie's MP3 clips as a compact flash asset plus a C++ index.
+"""Convert Voxie's MP3 clips to PCM and bundle them as a flash asset.
 
 Usage:
     python tools/embed_voxie_audio.py "C:\\path\\to\\Voxie Audio Files"
 """
 from pathlib import Path
+import subprocess
 import sys
 
 CLIPS = (
@@ -23,7 +24,15 @@ def main():
     entries = []
     with (destination / "AudioAssets.bin").open("wb") as bundle:
         for clip in CLIPS:
-            data = (source / f"{clip}.mp3").read_bytes()
+            # Decode up front so the ESP32 only has to copy fixed-rate PCM to
+            # I2S.  This avoids the small embedded MP3 decoder's large stack
+            # requirement and format artifacts on these source files.
+            data = subprocess.run(
+                ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+                 "-i", str(source / f"{clip}.mp3"), "-ac", "1", "-ar", "44100",
+                 "-f", "s16le", "pipe:1"],
+                check=True, stdout=subprocess.PIPE,
+            ).stdout
             bundle.write(data)
             entries.append((clip, offset, len(data)))
             offset += len(data)
@@ -36,6 +45,11 @@ def main():
         for clip, clip_offset, length in entries:
             out.write(f"constexpr Clip {clip} = {{{clip_offset}, {length}}};\n")
         out.write("} // namespace VoxieAudioAssets\n")
+
+    # PlatformIO does not automatically track .incbin dependencies inside
+    # assembly files.  Touch the wrapper so the next build always embeds the
+    # freshly generated binary rather than a stale audio bundle.
+    (destination / "AudioAssets.S").touch()
 
 
 if __name__ == "__main__":

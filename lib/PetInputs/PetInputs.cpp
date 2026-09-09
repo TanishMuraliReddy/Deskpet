@@ -23,6 +23,8 @@ PetInputs::PetInputs(uint8_t touchPin, int micSckPin, int micWsPin, int micSdPin
 
 void PetInputs::begin() {
     // touchRead() needs no pinMode() call on the ESP32 Arduino core.
+    Serial.printf("[touch] GPIO%d ready; active above %u. Raw values will print every 250 ms.\n",
+                  _touchPin, _touchThreshold);
 
     i2s_config_t config = {
         .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
@@ -53,10 +55,23 @@ void PetInputs::begin() {
 
 void PetInputs::update() {
     uint16_t reading = touchRead(_touchPin);
-    // Touching the pad raises capacitance, which lowers the reading.
-    bool active = reading < _touchThreshold;
+    // On this ESP32-S3 board and copper-tape pad, touch raises the raw count.
+    // Untouched readings are about 20k; two real touches measured 40k+.
+    bool active = reading > _touchThreshold;
     _touchEdge = active && !_touchActive;
+    const bool released = !active && _touchActive;
     _touchActive = active;
+
+    const uint32_t now = millis();
+    if (_touchEdge) {
+        Serial.printf("[touch] TOUCHED  raw=%u  threshold=%u\n", reading, _touchThreshold);
+    } else if (released) {
+        Serial.printf("[touch] released raw=%u\n", reading);
+    } else if (now - _lastTouchTelemetryMs >= 250) {
+        Serial.printf("[touch] raw=%u  threshold=%u  state=%s\n", reading, _touchThreshold,
+                      active ? "TOUCHED" : "idle");
+        _lastTouchTelemetryMs = now;
+    }
 
     updateMic();
 }

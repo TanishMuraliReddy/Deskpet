@@ -86,6 +86,20 @@ contends with the mic for the I2S peripheral/sample rate:
 
 **Touch pad** - GPIO 1 (any wire/foil pad, no module needed).
 
+**MG90S servo**
+
+| Servo lead | Connection |
+|---|---|
+| Signal (yellow/orange) | GPIO 18 |
+| Power (red) | Separate regulated 5V supply, at least 2A |
+| Ground (brown/black) | Servo supply ground, tied to ESP32 GND |
+
+The firmware uses ESP32Servo's dedicated hardware PWM at 50Hz, calibrated to
+500–2400us, and commands a new trajectory point only once per 20ms frame. Do
+not power the MG90S and the MAX98357A from a computer USB port. Put a 470–1000
+uF electrolytic capacitor across the 5V and GND rails close to the servo/amp
+(capacitor `+` to 5V, `-` to GND) to absorb their startup/current spikes.
+
 All grounds (LCD, mic, amp) are common - tie them together on a shared rail
 if you're breadboarding, or twist/joint them if soldering.
 

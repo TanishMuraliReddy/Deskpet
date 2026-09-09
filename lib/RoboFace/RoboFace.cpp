@@ -30,16 +30,19 @@ uint16_t lerpColor565(uint16_t a, uint16_t b, float t) {
 FaceParams expressionParams(Expression e) {
     switch (e) {
         case Expression::HAPPY:
-            // A kind, contented expression: soft curved closed eyes and a
-            // shallow smile, rather than a hard squint or an exaggerated grin.
-            return {0.98f, 0.20f, 1.0f, 0.03f, 0.0f, 0.82f, 0.36f, 0.0f, 0.72f, false, false, 0.0f};
+            // Eyes and mouth are both a single plain quadratic curve (see
+            // the rewritten drawEyeArc()/drawMouth()) - the same primitive
+            // a simple reference sketch of a happy face would use, not a
+            // bespoke eased shape.
+            return {1.0f, 0.22f, 1.0f, 0.0f, 0.0f, 0.85f, 0.65f, 0.0f, 0.85f, false, false, 0.0f};
         case Expression::SAD:
-            // The reference's sad expression has tall, rounded teardrop
-            // eyes with their pointed tops facing inward.  Keep the eyes
-            // high on the screen and make the frown wide and pronounced.
-            return {1.10f, 1.18f, 1.0f, -0.42f, -0.92f, 0.0f, -0.92f, 0.0f, 1.06f, false, false, 0.0f};
-        case Expression::ANGRY:
+            // Use the previous Angry design as the new Sad face, per the
+            // current expression swap request.
             return {0.9f, 0.75f, 0.85f, 0.0f, 0.9f, 0.15f, -0.4f, 0.0f, 0.45f, false, false, 0.0f};
+        case Expression::ANGRY:
+            // Start with the neutral face's open rounded eyes, then carve
+            // the angry slash directly into their inward top corners.
+            return {1.0f, 1.0f, 1.0f, 0.0f, 0.82f, 0.0f, -0.84f, 0.0f, 0.78f, false, false, 0.0f};
         // Teardrop eyes (rounded bottom, gently angled top) with a separate
         // worried/sorry eyebrow arc above each (see drawBrow()) - the tilt
         // reads through the brow now, so the eye itself stays a clean
@@ -59,10 +62,11 @@ FaceParams expressionParams(Expression e) {
         case Expression::SUSPICIOUS:
             return {0.85f, 0.5f, 0.7f, 0.05f, 0.3f, 0.4f, -0.2f, 0.0f, 0.4f, false, false, 0.0f};
         case Expression::ADORING:
-            // A loving smile reads as a gentle, wide arc, not a pronounced
-            // peak - lower mouthCurve + wider mouthWidth spreads the same
-            // curve over more width, flattening it out.
-            return {1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.7f, 0.0f, 0.7f, true, false, 0.0f};
+            // Shares Happy's plain curved-eye look (no hearts) but with a
+            // deeper curve and a fuller smile - the shutterBlink() triggered
+            // from setExpression() below is what actually sells the "petted"
+            // reaction on entry.
+            return {1.0f, 0.20f, 1.0f, 0.0f, 0.0f, 0.88f, 0.70f, 0.0f, 0.88f, false, false, 0.0f};
         case Expression::SCARED:
             return {1.3f, 1.3f, 1.1f, -0.1f, 0.0f, 0.0f, 0.0f, 0.5f, 0.3f, false, false, 0.0f};
         case Expression::VIBING:
@@ -106,8 +110,11 @@ constexpr float kEyeDroopRange = 16.0f;
 constexpr float kMouthBaseWidth = 58.0f;
 constexpr float kMouthCurveAmplitude = 15.0f;
 constexpr float kMouthOpenMaxHeight = 26.0f;
-constexpr float kLookRangeX = 8.0f;
-constexpr float kLookRangeY = 5.0f;
+// Let idle glances travel almost from edge to edge. render() further clamps
+// the actual offset for each expression, so large scared/sad eyes stay fully
+// on the 128 px display.
+constexpr float kLookRangeX = 18.0f;
+constexpr float kLookRangeY = 12.0f;
 
 } // namespace
 
@@ -116,6 +123,7 @@ RoboFace::RoboFace(Adafruit_GFX* gfx, int16_t width, int16_t height)
       _eyeColor(0xFFFF), _bgColor(0x0000),
       _autonomous(true),
       _nextBlinkAtMs(0), _blinkStartMs(0), _blinking(false),
+      _shuttering(false), _shutterStartMs(0),
       _lookX(0), _lookY(0), _lookTargetX(0), _lookTargetY(0),
       _manualLookUntilMs(0), _nextSaccadeAtMs(0),
       _talking(false), _mouthOverrideActive(false), _mouthOverrideAmount(0.0f),
@@ -145,6 +153,9 @@ void RoboFace::setExpression(Expression e, float transitionSeconds) {
     _transitionStartMs = millis();
     _transitionDurationMs = (uint32_t)(transitionSeconds * 1000.0f);
     if (_transitionDurationMs == 0) _transitionDurationMs = 1;
+    // The "petted" reaction reads as an event, not just a pose - ease into
+    // it with the same slow blink a dog gives when it's enjoying being pet.
+    if (e == Expression::ADORING) shutterBlink();
 }
 
 void RoboFace::setTalking(bool on) {
@@ -171,6 +182,12 @@ void RoboFace::blinkOnce() {
     }
 }
 
+void RoboFace::shutterBlink() {
+    _shuttering = true;
+    _shutterStartMs = millis();
+    _blinking = false;
+}
+
 void RoboFace::setAutonomous(bool on) {
     _autonomous = on;
 }
@@ -193,7 +210,7 @@ void RoboFace::tick(float dtSeconds) {
     _current = lerpParams(_transitionStart, _target, easeInOutQuad(t));
 
     // Autonomous blink scheduling
-    if (_autonomous && !_blinking && now >= _nextBlinkAtMs) {
+    if (_autonomous && !_blinking && !_shuttering && now >= _nextBlinkAtMs) {
         _blinking = true;
         _blinkStartMs = now;
     }
@@ -202,13 +219,32 @@ void RoboFace::tick(float dtSeconds) {
         _nextBlinkAtMs = now + random(2000, 6000);
     }
 
+    // Shutter blink: close, hold, reopen, then fall back to normal idle
+    // blinking (pushed out a bit so a regular blink doesn't immediately
+    // follow the shutter).
+    if (_shuttering &&
+        now - _shutterStartMs >= kShutterCloseMs + kShutterHoldMs + kShutterOpenMs) {
+        _shuttering = false;
+        _nextBlinkAtMs = now + random(2000, 6000);
+    }
+
     // Gaze: autonomous saccades unless a manual lookAt() is still holding
     if (_autonomous && now >= _manualLookUntilMs && now >= _nextSaccadeAtMs) {
         // Avoid tiny near-center target changes: they existed, but were too
         // subtle to read as a living idle glance on the small OLED.
-        const float side = random(0, 2) ? 1.0f : -1.0f;
-        _lookTargetX = side * (random(55, 101) / 100.0f);
-        _lookTargetY = (random(-35, 36) / 100.0f);
+        // Mix clear vertical looks with deliberate diagonal glances.  The
+        // previous +/-0.35 vertical target only moved the face by ~2 px,
+        // which was effectively invisible on this panel.
+        if (random(0, 100) < 25) {
+            _lookTargetX = random(-25, 26) / 100.0f;
+            _lookTargetY = (random(0, 2) ? 1.0f : -1.0f) *
+                           (random(65, 101) / 100.0f);
+        } else {
+            _lookTargetX = (random(0, 2) ? 1.0f : -1.0f) *
+                           (random(55, 101) / 100.0f);
+            _lookTargetY = (random(0, 2) ? 1.0f : -1.0f) *
+                           (random(35, 86) / 100.0f);
+        }
         _nextSaccadeAtMs = now + random(900, 1900);
     }
     float lookRate = clampf(dtSeconds * 6.0f, 0.0f, 1.0f);
@@ -225,15 +261,43 @@ float RoboFace::blinkFactor() const {
     return 1.0f - clampf(closeAmount, 0.0f, 1.0f);
 }
 
+float RoboFace::shutterFactor() const {
+    if (!_shuttering) return 1.0f;
+    uint32_t elapsed = millis() - _shutterStartMs;
+    if (elapsed < kShutterCloseMs) {
+        return 1.0f - easeInOutQuad((float)elapsed / (float)kShutterCloseMs);
+    }
+    if (elapsed < kShutterCloseMs + kShutterHoldMs) {
+        return 0.0f;
+    }
+    if (elapsed < kShutterCloseMs + kShutterHoldMs + kShutterOpenMs) {
+        float p = (float)(elapsed - kShutterCloseMs - kShutterHoldMs) / (float)kShutterOpenMs;
+        return easeInOutQuad(p);
+    }
+    return 1.0f;
+}
+
 void RoboFace::render() {
     _gfx->fillScreen(_bgColor);
 
-    float openness = blinkFactor();
+    float openness = fminf(blinkFactor(), shutterFactor());
     int16_t cx = _w / 2;
     int16_t cy = _h / 2;
     float spacingPx = kBaseEyeSpacing * _current.eyeSpacing;
-    float lookOffX = _lookX * kLookRangeX;
-    float lookOffY = _lookY * kLookRangeY;
+    const bool isSad = _current.lidSlant < -0.86f && _current.eyeHeight > 1.10f;
+    const bool isAngry = _current.lidSlant > 0.78f && _current.mouthCurve < -0.80f;
+
+    // The face can now use the full width of the screen.  Calculate the
+    // expression-specific safe travel instead of using a tiny fixed range.
+    float eyeHalfWidth = kBaseEyeW * _current.eyeWidth * 0.5f;
+    if (isSad || isAngry) eyeHalfWidth = fmaxf(eyeHalfWidth, 22.0f);
+    float leftTravel = cx - spacingPx * 0.5f - eyeHalfWidth - 2.0f;
+    float rightTravel = (_w - 1) - (cx + spacingPx * 0.5f) - eyeHalfWidth - 2.0f;
+    float safeLookRangeX = fmaxf(0.0f, fminf(leftTravel, rightTravel));
+    float lookOffX = clampf(_lookX * kLookRangeX, -safeLookRangeX, safeLookRangeX);
+    // A 12 px vertical excursion is safe for every current eye design,
+    // including the taller scared, sad, and angry faces.
+    float lookOffY = clampf(_lookY * kLookRangeY, -12.0f, 12.0f);
     float droopPx = _current.eyeDroop * kEyeDroopRange;
 
     int16_t leftX = (int16_t)(cx - spacingPx / 2 + lookOffX);
@@ -254,12 +318,25 @@ void RoboFace::render() {
 
     // The reference Sad face places its large frown slightly closer to the
     // eyes than the other expressions.
-    const bool isSad = _current.lidSlant < -0.86f && _current.eyeHeight > 1.10f;
-    int16_t mouthY = isSad ? (int16_t)(cy + 34) : (int16_t)(cy + 38);
-    drawMouth(cx + (int16_t)(lookOffX * 0.3f), mouthY, _eyeColor);
+    // Both of the custom reference faces sit their mouth higher than the
+    // ordinary expression layout, leaving breathing room at the bottom.
+    int16_t mouthY = (isSad || isAngry) ? (int16_t)(cy + 21) : (int16_t)(cy + 38);
+    // Follow the eyes vertically by a smaller amount, which makes the whole
+    // face shift naturally without the mouth crowding the screen edge.
+    mouthY += (int16_t)(lookOffY * 0.45f);
+    if (isSad) {
+        drawSadMouth(cx + (int16_t)lookOffX, mouthY, _eyeColor);
+    } else if (isAngry) {
+        drawAngryMouth(cx + (int16_t)lookOffX, mouthY, _eyeColor);
+    } else {
+        drawMouth(cx + (int16_t)lookOffX, mouthY, _eyeColor);
+    }
 
     if (_current.sleeping) {
-        drawSleepZs(rightX + 4, eyeY - 26, _eyeColor);
+        // Keep sleep indicators in a fixed upper-right corner.  Anchoring
+        // them to a moving eye could make them appear to originate from the
+        // left side after an idle glance or expression transition.
+        drawSleepZs(_w - 42, 31, _eyeColor);
     }
 
     // If _gfx is a buffered target (e.g. Arduino_Canvas), the caller is
@@ -270,11 +347,20 @@ void RoboFace::drawEye(int16_t centerX, int16_t centerY, bool isLeftEye,
                         float openness, uint16_t color) const {
     float w = kBaseEyeW * _current.eyeWidth;
 
+    if (_current.lidSlant > 0.78f && _current.mouthCurve < -0.80f && openness > 0.45f) {
+        // The supplied Angry reference has high, angular mask eyes instead
+        // of regular rounded eyes with a superficial slash cut.
+        drawAngryEye(centerX, centerY - 20, isLeftEye, color);
+        return;
+    }
+
     // Generic corner masks made the old Sad expression look too close to a
     // normal rounded eye.  Draw the reference's unmistakable teardrop shape
     // directly once the Sad transition has reached its target geometry.
     if (_current.lidSlant < -0.86f && _current.eyeHeight > 1.10f && openness > 0.45f) {
-        drawSadEye(centerX, centerY, isLeftEye, color);
+        // Sad's reference eyes are placed high in the face, unlike the
+        // regular expression layout whose sockets are vertically centered.
+        drawSadEye(centerX, centerY - 15, isLeftEye, color);
         return;
     }
 
@@ -334,9 +420,13 @@ void RoboFace::drawSadEye(int16_t centerX, int16_t centerY, bool isLeftEye,
     // the supplied reference, rather than a slanted rectangle.
     const int16_t direction = isLeftEye ? 1 : -1;
     const int16_t offsets[][2] = {
-        {-20, -12}, {-2, -27}, {10, -22}, {18, -12},
-        {21,   1}, {21,  13}, {15,  23}, {5,  27},
-        {-7,  27}, {-16, 21}, {-21, 12}, {-22,  1}
+        // Long diagonal from the outer edge to the inward top peak.
+        {-18,  -4}, { 4, -20}, {11, -17}, {16, -12},
+        // A rounded inner/top shoulder and softly bulbous lower half.
+        { 19,  -5}, {20,   0}, {20,   6}, {18,  12},
+        { 14,  16}, {10,  18}, { 4,  19}, {-3,  19},
+        {-9,  17}, {-14, 14}, {-18,   9}, {-20,  3},
+        {-20,  -3}
     };
     constexpr uint8_t kPoints = sizeof(offsets) / sizeof(offsets[0]);
     int16_t px[kPoints];
@@ -348,20 +438,79 @@ void RoboFace::drawSadEye(int16_t centerX, int16_t centerY, bool isLeftEye,
     fillPolygon(px, py, kPoints, color);
 }
 
+void RoboFace::drawSadMouth(int16_t centerX, int16_t centerY, uint16_t color) const {
+    // A generous, rounded frown like the reference: many samples plus a
+    // 6px rounded stroke eliminate the pointed/segmented look of the shared
+    // thin mouth renderer.
+    constexpr uint8_t kSteps = 56;
+    constexpr float kHalfWidth = 27.0f;
+    constexpr float kArchHeight = 13.0f;
+    float prevX = centerX - kHalfWidth;
+    float prevY = centerY;
+    for (uint8_t i = 1; i <= kSteps; ++i) {
+        float t = i / (float)kSteps;
+        float x = lerp(-kHalfWidth, kHalfWidth, t);
+        float bump = sinf(3.14159265f * t);
+        float y = centerY - kArchHeight * bump * bump;
+        stampLine(prevX, prevY, centerX + x, y, 1, 6, color);
+        prevX = centerX + x;
+        prevY = y;
+    }
+}
+
+void RoboFace::drawAngryEye(int16_t centerX, int16_t centerY, bool isLeftEye,
+                             uint16_t color) const {
+    // Six-point angular eye silhouette.  The tall outside corner and low,
+    // inward point give the exact aggressive inward slash of the reference.
+    const int16_t direction = isLeftEye ? 1 : -1;
+    const int16_t offsets[][2] = {
+        {-18, -9}, {-8, -18}, {22, 3}, {16, 15}, {-12, 15}, {-18, 5}
+    };
+    constexpr uint8_t kPoints = sizeof(offsets) / sizeof(offsets[0]);
+    int16_t px[kPoints];
+    int16_t py[kPoints];
+    for (uint8_t i = 0; i < kPoints; ++i) {
+        px[i] = centerX + offsets[i][0] * direction;
+        py[i] = centerY + offsets[i][1];
+    }
+    fillPolygon(px, py, kPoints, color);
+}
+
+void RoboFace::drawAngryMouth(int16_t centerX, int16_t centerY, uint16_t color) const {
+    // Broad upside-down arc with rounded ends.  The small asymmetry makes it
+    // feel like a tense scowl rather than a mathematically perfect symbol.
+    constexpr uint8_t kSteps = 52;
+    constexpr float kHalfWidth = 28.0f;
+    float prevX = centerX - kHalfWidth;
+    float prevY = centerY + 1.0f;
+    for (uint8_t i = 1; i <= kSteps; ++i) {
+        float t = i / (float)kSteps;
+        float x = lerp(-kHalfWidth, kHalfWidth, t);
+        float bump = sinf(3.14159265f * t);
+        float y = centerY - 14.0f * bump * bump + 1.5f * t;
+        stampLine(prevX, prevY, centerX + x, y, 1, 6, color);
+        prevX = centerX + x;
+        prevY = y;
+    }
+}
+
 void RoboFace::drawEyeArc(int16_t centerX, int16_t centerY, float halfWidth,
                            float bend, uint16_t color) const {
+    // A single plain quadratic curve from outer corner to outer corner,
+    // bowed through one control point above/below the midpoint - the same
+    // primitive a simple hand-drawn reference (a lone SVG <path ... Q ...>)
+    // would use, rather than a custom eased sample curve.
     const uint8_t steps = 22;
     const float amplitude = 8.0f;
+    float controlY = centerY - bend * amplitude * 2.0f;
     float prevX = centerX - halfWidth, prevY = centerY;
     for (uint8_t i = 1; i <= steps; i++) {
         float t = i / (float)steps;
-        float x = lerp(-halfWidth, halfWidth, t);
-        // Same eased sin^2 bump drawMouth() uses for its closed-mouth
-        // curve, so closed eyes and mouth read as the same "hand".
-        float bump = sinf(3.14159265f * t);
-        float y = centerY - bend * amplitude * bump * bump;
-        stampLine(prevX, prevY, centerX + x, y, 1, 2, color);
-        prevX = centerX + x;
+        float mt = 1.0f - t;
+        float x = mt * mt * (centerX - halfWidth) + 2.0f * mt * t * centerX + t * t * (centerX + halfWidth);
+        float y = mt * mt * centerY + 2.0f * mt * t * controlY + t * t * centerY;
+        stampLine(prevX, prevY, x, y, 1, 2, color);
+        prevX = x;
         prevY = y;
     }
 }
@@ -442,6 +591,18 @@ void RoboFace::drawBrow(int16_t centerX, int16_t eyeCenterY, bool isLeftEye,
     }
 }
 
+void RoboFace::drawAngryBrow(int16_t centerX, int16_t eyeCenterY,
+                              bool isLeftEye, uint16_t color) const {
+    // Angular eyebrows descend toward the nose: the classic angry slash.
+    // A rounded thick stroke prevents them looking like thin jagged pixels.
+    float halfWidth = kBaseEyeW * _current.eyeWidth * 0.52f;
+    float outerX = isLeftEye ? centerX - halfWidth : centerX + halfWidth;
+    float innerX = isLeftEye ? centerX + halfWidth : centerX - halfWidth;
+    float outerY = eyeCenterY - (kBaseEyeH * _current.eyeHeight) * 0.74f;
+    float innerY = outerY + 10.0f;
+    stampLine(outerX, outerY, innerX, innerY, 10, 4, color);
+}
+
 void RoboFace::fillPolygon(const int16_t* px, const int16_t* py, uint8_t count,
                             uint16_t color) const {
     int16_t minY = py[0], maxY = py[0];
@@ -507,23 +668,20 @@ void RoboFace::drawMouth(int16_t centerX, int16_t centerY, uint16_t color) const
         return;
     }
 
-    // Closed mouth: stroke a curve from corner to corner. mouthCurve>0 bows
-    // upward at the ends (smile), <0 bows downward at the ends (frown).
+    // Closed mouth: a single plain quadratic curve from corner to corner,
+    // through one control point below (smile, mouthCurve>0) or above
+    // (frown, mouthCurve<0) the midpoint - same primitive as drawEyeArc(),
+    // so the mouth and closed eyes read as the same "hand".
     const uint8_t steps = 36;
+    float controlY = centerY + _current.mouthCurve * kMouthCurveAmplitude * 2.0f;
     float prevX = centerX - halfWidth, prevY = centerY;
     for (uint8_t i = 1; i <= steps; i++) {
-        float tt = i / (float)steps;
-        float x = lerp(-halfWidth, halfWidth, tt);
-        // sin(pi*t)^2 is 0 at both corners *with zero slope there* and peaks
-        // at the middle, so the curve eases flat into the corners instead of
-        // arriving at a steep angle - a plain parabola has nonzero slope at
-        // t=0/1, which read as sharp, pointed corners rather than a soft
-        // curl. mouthCurve>0 (smile) pushes the middle down into a "U";
-        // mouthCurve<0 (frown) pulls it up into an "n".
-        float bump = sinf(3.14159265f * tt);
-        float y = centerY + (_current.mouthCurve * kMouthCurveAmplitude * bump * bump);
-        stampLine(prevX, prevY, centerX + x, y, 1, 2, color);
-        prevX = centerX + x;
+        float t = i / (float)steps;
+        float mt = 1.0f - t;
+        float x = mt * mt * (centerX - halfWidth) + 2.0f * mt * t * centerX + t * t * (centerX + halfWidth);
+        float y = mt * mt * centerY + 2.0f * mt * t * controlY + t * t * centerY;
+        stampLine(prevX, prevY, x, y, 1, 2, color);
+        prevX = x;
         prevY = y;
     }
 }

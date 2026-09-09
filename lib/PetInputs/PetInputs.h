@@ -19,7 +19,7 @@ public:
     // SCK/WS/SD pins; its L/R pin should be tied to GND (selects the left
     // channel, which is what this class reads).
     PetInputs(uint8_t touchPin, int micSckPin, int micWsPin, int micSdPin,
-              uint16_t touchThreshold = 40);
+              uint16_t touchThreshold = 33000);
 
     void begin();
     void update(); // call once per loop(), before reading any of the below
@@ -57,6 +57,7 @@ private:
     uint16_t _touchThreshold;
     bool _touchActive;
     bool _touchEdge;
+    uint32_t _lastTouchTelemetryMs = 0;
 
     bool _simulatedTipped;
 

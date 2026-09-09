@@ -153,7 +153,9 @@ void PetBrain::update() {
         return;
     }
     if (now < _touchedUntilMs) {
-        applyExpression(Expression::ADORING, 0.25f);
+        // A physical touch should feel immediate; keep a short blend so it
+        // still reads as organic rather than as a hard screen cut.
+        applyExpression(Expression::ADORING, 0.08f);
         return;
     }
     if (now < _answerUntilMs) {

@@ -12,7 +12,8 @@ enum class Expression : uint8_t {
     SLEEPY,      // drowsy, eyes going heavy
     SLEEPING,    // fully asleep - closed-line eyes, "o" mouth, floating "Z Z Z"
     SUSPICIOUS,
-    ADORING,     // heart eyes
+    ADORING,     // petted/loved reaction - Happy's curved eyes plus a slow
+                 // "shutter" blink on entry, no hearts
     SCARED,
     VIBING,          // relaxed closed-eye groove
     VIBING_ACTIVE,   // brief wide-eyed beat hit
@@ -65,7 +66,18 @@ public:
     // Autonomous saccades resume automatically after holdMs.
     void lookAt(float nx, float ny, uint32_t holdMs = 1500);
 
+    // Current rendered gaze, normalized to -1..1.  This lets body hardware
+    // follow the same autonomous/manual eye intention without taking control
+    // of the face animation itself.
+    float gazeX() const { return _lookX; }
+    float gazeY() const { return _lookY; }
+
     void blinkOnce();
+    // A slower, held-closed blink for contented/petted moments - eyes ease
+    // shut, hold, then ease back open, like a dog's slow happy blink.
+    // Distinct from blinkOnce() and automatically triggered by
+    // setExpression(ADORING, ...).
+    void shutterBlink();
     void setAutonomous(bool on); // idle blink + look-around behavior
 
     // Defaults are a white face on a black background.
@@ -94,6 +106,13 @@ private:
     bool _blinking;
     static const uint32_t kBlinkDurationMs = 260;
 
+    // Slow "shutter" blink state (see shutterBlink())
+    bool _shuttering;
+    uint32_t _shutterStartMs;
+    static const uint32_t kShutterCloseMs = 350;
+    static const uint32_t kShutterHoldMs = 250;
+    static const uint32_t kShutterOpenMs = 350;
+
     // Saccade / gaze state
     float _lookX, _lookY;         // current rendered gaze offset, -1..1
     float _lookTargetX, _lookTargetY;
@@ -110,6 +129,7 @@ private:
     void tick(float dtSeconds);
     void render();
     float blinkFactor() const; // 1.0 = fully open, 0.0 = fully closed
+    float shutterFactor() const; // combines with blinkFactor() via fminf()
 
     void drawEye(int16_t centerX, int16_t centerY, bool isLeftEye,
                  float openness, uint16_t color) const;
@@ -118,6 +138,10 @@ private:
     // distinctive inward-pointing silhouette on the small OLED.
     void drawSadEye(int16_t centerX, int16_t centerY, bool isLeftEye,
                      uint16_t color) const;
+    void drawSadMouth(int16_t centerX, int16_t centerY, uint16_t color) const;
+    void drawAngryEye(int16_t centerX, int16_t centerY, bool isLeftEye,
+                      uint16_t color) const;
+    void drawAngryMouth(int16_t centerX, int16_t centerY, uint16_t color) const;
     // Soft closed-eye curve used when an eye is nearly/fully shut (blink,
     // SLEEPY, SLEEPING): bend>0 arches upward ("^_^"), bend<0 droops (sad).
     void drawEyeArc(int16_t centerX, int16_t centerY, float halfWidth,
@@ -129,7 +153,9 @@ private:
                        float widthFrac, bool towardRight) const;
     void drawHeartEye(int16_t centerX, int16_t centerY, uint16_t color) const;
     void drawBrow(int16_t centerX, int16_t eyeCenterY, bool isLeftEye,
-                   float droop, uint16_t color) const;
+                  float droop, uint16_t color) const;
+    void drawAngryBrow(int16_t centerX, int16_t eyeCenterY, bool isLeftEye,
+                       uint16_t color) const;
     void drawMouth(int16_t centerX, int16_t centerY, uint16_t color) const;
     void drawSleepZs(int16_t anchorX, int16_t anchorY, uint16_t color) const;
     void stampLine(float x0, float y0, float x1, float y1, uint8_t steps,
