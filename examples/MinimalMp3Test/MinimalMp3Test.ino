@@ -10,9 +10,9 @@
 
 using namespace audio_tools;
 
-constexpr int MAX_BCLK = 5;
-constexpr int MAX_LRC = 4;
-constexpr int MAX_DIN = 7;
+constexpr int MAX_BCLK = 13;
+constexpr int MAX_LRC = 12;
+constexpr int MAX_DIN = 14;
 constexpr uint32_t SAMPLE_RATE = 44100;
 
 AudioSourceLittleFS source("/", "mp3");

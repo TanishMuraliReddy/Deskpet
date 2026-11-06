@@ -4,11 +4,11 @@
 // Dedicated bring-up test for the 1.5 in 128x128 SH1107, seven-pin SPI OLED.
 // It deliberately shares the production wiring, but has no Wi-Fi, audio, or
 // servo dependencies that could obscure a display wiring problem.
-constexpr uint8_t kOledClk = 12;
-constexpr uint8_t kOledData = 11;
-constexpr uint8_t kOledCs = 10;
-constexpr uint8_t kOledDc = 9;
-constexpr uint8_t kOledReset = 8;
+constexpr uint8_t kOledClk = 1;
+constexpr uint8_t kOledData = 2;
+constexpr uint8_t kOledCs = 5;
+constexpr uint8_t kOledDc = 4;
+constexpr uint8_t kOledReset = 3;
 
 U8G2_SH1107_PIMORONI_128X128_F_4W_SW_SPI oled(
     U8G2_R0, kOledClk, kOledData, kOledCs, kOledDc, kOledReset);
@@ -38,7 +38,7 @@ void loop() {
     oled.setDrawColor(0);
     oled.setFont(u8g2_font_6x12_tf);
     oled.drawStr(25, 61, "SH1107 SPI");
-    oled.drawStr(31, 77, "GPIO 12/11");
+    oled.drawStr(31, 77, "GPIO 1/2");
     oled.setDrawColor(1);
     oled.sendBuffer();
 

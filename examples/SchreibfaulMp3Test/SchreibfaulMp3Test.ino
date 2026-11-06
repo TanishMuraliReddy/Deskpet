@@ -5,7 +5,7 @@
   amplifier wiring already working on Voxie and reads the existing Cute1.mp3
   file from LittleFS (internal flash).  No SD card or changed GPIOs are used.
 
-  MAX98357A: BCLK GPIO5, LRC GPIO4, DIN GPIO7
+  MAX98357A: BCLK GPIO13, LRC GPIO12, DIN GPIO14
   Microphone: remains on I2S port 0 in the full firmware; this test reserves
   I2S port 1 to match that arrangement.
 */
@@ -15,9 +15,9 @@
 #include <Audio.h>
 #include <driver/i2s.h>
 
-constexpr int kAmpBclk = 5;
-constexpr int kAmpLrc = 4;
-constexpr int kAmpDin = 7;
+constexpr int kAmpBclk = 13;
+constexpr int kAmpLrc = 12;
+constexpr int kAmpDin = 14;
 constexpr char kTrack[] = "/Cute1.mp3";
 
 constexpr const char* kTracks[] = {
@@ -114,7 +114,7 @@ void setup() {
   Serial.begin(115200);
   delay(250);
   Serial.println("\nVoxie MP3 quality test (ESP32-audioI2S)");
-  Serial.println("MAX pins unchanged: BCLK=5, LRC=4, DIN=7; storage=LittleFS.");
+  Serial.println("MAX pins unchanged: BCLK=13, LRC=12, DIN=14; storage=LittleFS.");
 
   if (!LittleFS.begin(false, "/littlefs", 10, "spiffs")) {
     Serial.println("[audio] LittleFS mount failed. Upload the filesystem image, then retry.");

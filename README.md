@@ -1,7 +1,7 @@
 # desk-pet-eyes
 
 A reactive desk pet built around procedural (not video-clip) eyes + mouth
-animation for an ESP32-driven 1.52" round GC9A01 display. Everything is
+animation for an ESP32-driven 1.5" SH1107 128x128 OLED. Everything is
 drawn live every frame, so there are no image/GIF assets to store on flash,
 and expressions blend smoothly into each other instead of cutting.
 
@@ -22,11 +22,9 @@ bottom of this file for how to run it instead).
 - ESP32-S3 (this build targets `esp32-s3-devkitc-1` in `platformio.ini`;
   any ESP32-S3 Arduino-core board works, PSRAM not required at this canvas
   size)
-- Round GC9A01 SPI TFT, commonly sold as 1.28"/1.5"/1.54" modules. Almost
-  all of these panels are **240x240** regardless of the diagonal size in
-  the listing - confirm against your specific module's datasheet and
-  change `PANEL_W`/`PANEL_H` in `src/main.cpp` if yours differs.
-- A wire or foil pad on GPIO1 for touch (the ESP32-S3's built-in capacitive
+- 1.5" SH1107 128x128 SPI OLED. The firmware configures this display in
+  `src/main.cpp` using the U8g2 `SH1107_PIMORONI_128X128` driver.
+- A wire or foil pad on GPIO9 for touch (the ESP32-S3's built-in capacitive
   touch input needs no sensor module).
 - An I2S MEMS microphone (INMP441 or similar) for **real** loud-noise
   detection - see **PetInputs** below.
@@ -39,34 +37,32 @@ bottom of this file for how to run it instead).
 
 Default pins in `src/main.cpp` (change to match your wiring):
 
-**LCD (GC9A01, SPI)**
+**OLED (SH1107, four-wire software SPI)**
 
-| GC9A01 pin | ESP32-S3 pin |
+| OLED pin | ESP32-S3 pin |
 |---|---|
-| RES / RST | GPIO 8 |
-| DC / RS | GPIO 9 |
-| CS | GPIO 10 |
-| SDA / DIN | GPIO 11 (SPI MOSI) |
-| SCL / SCK | GPIO 12 (SPI clock) |
+| RES / RST | GPIO 3 |
+| DC / RS | GPIO 4 |
+| CS | GPIO 5 |
+| SDA / DIN | GPIO 2 (SPI MOSI) |
+| SCL / SCK | GPIO 1 (SPI clock) |
 | BLK (backlight) | 3.3V (always on) |
 | VCC | 3.3V |
 | GND | GND |
 
-SCK/MOSI aren't passed explicitly in `main.cpp` - GPIO 11/12 are the
-ESP32-S3 Arduino core's default hardware SPI (FSPI) pins, so the
-3-argument `Adafruit_GC9A01A(cs, dc, rst)` constructor already uses them. If
-your wiring uses different SCK/MOSI pins, either rewire to match, or switch
-to the 6-argument constructor (`cs, dc, mosi, sck, rst, miso`) instead.
+Clock and data are explicitly set to GPIO 1 and GPIO 2 for software SPI.
+GPIO 11 is reserved for amplifier DIN; do not wire the display to the
+hardware SPI defaults.
 
 **I2S microphone (INMP441)** - input bus, real loud-noise detection, runs on
 `I2S_NUM_0`:
 
 | Mic pin | ESP32-S3 pin |
 |---|---|
-| SD | GPIO 15 |
-| SCK | GPIO 16 |
-| WS | GPIO 17 |
-| L/R | GND (selects the left channel) |
+| SD | GPIO 6 |
+| SCK | GPIO 10 |
+| WS | GPIO 7 |
+| L/R | 3.3V (selects the right channel; verified with this Super Mini wiring) |
 | VDD | 3.3V (5V will destroy the mic) |
 | GND | GND |
 
@@ -75,22 +71,31 @@ contends with the mic for the I2S peripheral/sample rate:
 
 | Amp pin | ESP32-S3 pin |
 |---|---|
-| LRC | GPIO 4 |
-| BCLK | GPIO 5 |
-| DIN | GPIO 6 |
+| LRC | GPIO 12 |
+| BCLK | GPIO 13 |
+| DIN | GPIO 11 |
 | GAIN | not connected (defaults to 9dB) |
 | SD | not connected (defaults to mixing L+R) |
 | VIN / VCC | 5V (VIN/VBUS - needed for enough current to drive the speaker without browning out the board) |
 | GND | GND |
 | +, - | speaker |
 
-**Touch pad** - GPIO 1 (any wire/foil pad, no module needed).
+**Touch pad** - GPIO 9 (any wire/foil pad, no module needed).
+
+**Volume settings buttons** - two momentary buttons, with one side of each
+button connected to GND and the other to its GPIO. The firmware uses internal
+pull-ups, so no external resistors are needed:
+
+| Button | ESP32-S3 pin |
+|---|---|
+| Left (quieter) | GPIO 16 |
+| Right (louder / enter settings) | GPIO 17 |
 
 **MG90S servo**
 
 | Servo lead | Connection |
 |---|---|
-| Signal (yellow/orange) | GPIO 18 |
+| Signal (yellow/orange) | GPIO 15 |
 | Power (red) | Separate regulated 5V supply, at least 2A |
 | Ground (brown/black) | Servo supply ground, tied to ESP32 GND |
 
@@ -102,6 +107,37 @@ uF electrolytic capacitor across the 5V and GND rails close to the servo/amp
 
 All grounds (LCD, mic, amp) are common - tie them together on a shared rail
 if you're breadboarding, or twist/joint them if soldering.
+
+## Tweaking robot settings
+
+The two buttons provide a simple volume adjustment mode:
+
+1. Hold the **right** button for 3 seconds. Voxie plays a confirmation sound
+   and enters volume mode.
+2. Click **right** to raise the volume by 20%, or **left** to lower it by 20%.
+   Voxie plays a short preview at the selected level after each click. Volume
+   moves through five steps: 0%, 20%, 40%, 60%, 80%, and 100%. The OLED
+   switches to an animated volume screen showing the level and button
+   directions while settings mode is active.
+3. Press both buttons together to save and exit immediately, or leave the
+   buttons untouched for 30 seconds. On timeout, Voxie saves the selected
+   volume to ESP32 nonvolatile storage and exits automatically. Changes are
+   not saved if power is removed before either exit completes.
+
+The saved master volume scales every synthesized robot sound; mood can still
+make playback quieter when the pet is tired. The serial command `audio vol
+<0-100>` can also change volume temporarily. When entering settings mode, an
+existing volume is rounded to the nearest 20% step.
+
+The current SH1107 OLED is monochrome, so eye color cannot be changed on this
+display. To make eye color an adjustable setting, use a color display and
+update the display driver and face-rendering colors in `src/main.cpp` and
+`lib/RoboFace/`.
+
+For code-level tuning, `src/main.cpp` contains the button pins, volume step,
+entry hold, and idle timeout. `lib/VoxieAudio/VoxieAudio.cpp` contains the
+synthesized sound patterns; `lib/RoboFace/RoboFace.cpp` contains face shapes
+and expression rendering.
 
 ## Build
 
@@ -124,6 +160,48 @@ or noise-threshold defaults below have been checked on real hardware.
 pio run -t upload
 pio device monitor
 ```
+
+For the 4 MB ESP32-S3 Super Mini wiring above, build and flash the full
+firmware with its matching partition layout:
+
+```
+pio run -e esp32-s3-super-mini -t upload
+pio device monitor -e esp32-s3-super-mini
+```
+
+The Super Mini target reserves a LittleFS partition for the bundled clips and
+uses the microphone on GPIO 6 to keep its data line separate from amplifier
+DIN on GPIO 11.
+
+For browser-based mic monitoring and labeled WAV recording from the ESP32
+microphone, open `tools/voice_terminal.html` in Chrome or Edge, connect to the
+board, and start the mic stream. It supports adaptive voice-activity capture,
+manual room-noise recordings, WAV download/playback, and buttons for testing
+the board's `voice voxie`, `wake`, `sleep`, and `hey` commands. It records
+examples; speech recognition and learned wake-word matching are handled by
+`tools/mic_display.py`, not in the browser page. Run `tools/mic_display.bat`
+for live spoken commands from the ESP32 mic. It now listens immediately, so
+you can say “Hey Voxie” without first completing voice calibration; the
+optional “Calibrate voice” button remains available to learn your level.
+The recognizer accepts direct phrases such as “sleep” and “wake up” by
+default; “Require Voxie first” can be enabled when you want to avoid reacting
+to background conversations. Common transcription variants such as “Foxie,”
+“Boxy,” and “Nevaise” are treated as the wake name.
+
+For an isolated MAX98357A output check on the alternate board (BCLK GPIO13,
+LRC GPIO12, DIN GPIO11), build and upload `amplifier-test` instead:
+
+```
+pio run -e amplifier-test -t upload
+```
+
+It plays a short 440Hz tone at startup. The existing web control panel or a
+serial terminal can play the synthesized sound buttons (`cute`, `yes`, `no`,
+`scared`, `shy`, `wakeup`, `sleepy`, `angry`), `audio tone`,
+`audio longtone`, `audio pintest`, `audio vol 0-100`, or `audio status`.
+This test replaces the firmware on that board. The normal project firmware
+uses an 8 MB partition map; do not flash it to a 4 MB board without first
+using a compatible 4 MB partition layout.
 
 Dependencies (`adafruit/Adafruit GFX Library`, `adafruit/Adafruit BusIO`,
 `adafruit/Adafruit GC9A01A`, `bblanchon/ArduinoJson`) are declared in
@@ -152,7 +230,7 @@ fighting over the display:
    occasional personality rather than a constant twitch.
 
 `PetInputs` (`lib/PetInputs/`) is where sensor readings come from. Touch is
-real (ESP32-S3 `touchRead()` on GPIO1). **Loud-noise detection is also real**,
+real (ESP32-S3 `touchRead()` on GPIO9). **Loud-noise detection is also real**,
 via the I2S mic:
 
 - `PetInputs::begin()` starts a continuous I2S RX stream on `I2S_NUM_0` at
@@ -169,12 +247,19 @@ via the I2S mic:
   cooldown after each trigger stops one loud event from firing repeatedly,
   and that same window is excluded from the floor average so the loud event
   itself doesn't drag the baseline up.
+- While asleep, the noise detector uses the higher threshold
+  `max(14000, noiseFloor * 3.5)` instead of the awake threshold
+  `max(6000, noiseFloor * 2.0)`. Music/beat detection also requires a peak of
+  at least 14000 while asleep (5000 while awake), so quieter ambient sound
+  cannot wake the pet through the music path either. Touch and explicit voice
+  commands can still wake it.
 - Tuning knobs (`kNoiseFactor`, `kMinAbsThreshold`, `kNoiseCooldownMs`,
-  `kFloorAlpha`) live at the top of `PetInputs.cpp`. To tune for your actual
-  mic/enclosure, flash, open `pio device monitor`, type `m` + Enter to turn
-  on live level printing, and watch `peak` vs `floor` while you talk/clap at
-  different distances - raise `kMinAbsThreshold` if quiet room noise still
-  triggers it, lower it if claps don't.
+  `kAsleepNoiseFactor`, `kAsleepMinAbsThreshold`, and `kFloorAlpha`) live at
+  the top of `PetInputs.cpp`; the asleep music threshold is in `main.cpp`.
+  To tune for your actual mic/enclosure, flash, open `pio device monitor`,
+  type `m` + Enter to turn on live level printing, and watch `peak` vs `floor`
+  while you talk/clap at different distances - raise the applicable minimum
+  threshold if quiet room noise still triggers it, lower it if claps don't.
 - Tilt (orientation) still needs hardware this project doesn't have yet - an
   IMU like an MPU6050 - so it stays simulated via `simulateToggleTip()`,
   wired into the exact same `PetBrain::notifyTipped()` call a real IMU

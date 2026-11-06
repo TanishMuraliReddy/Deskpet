@@ -19,6 +19,25 @@
 // them full-screen and clean (just the value, e.g. "72F") instead of
 // cluttering the face with a sentence. Conversational replies (greetings,
 // praise, name, stats, ...) keep the face on screen with a short caption.
+//
+// Adaptive mood, on top of the counters. Touch, voice, praise/scolding,
+// being tipped and loud noises nudge a set of moods; update() then lets them
+// drift over time like a real pet's would:
+//   happiness   relaxes toward its own baseline, and that baseline slowly
+//               follows how happy the pet has actually been lately - so a
+//               well-treated pet settles at a higher resting mood and a
+//               neglected/shaken one at a lower one (the baseline persists).
+//   energy      drains while awake, recovers while asleep; low energy means
+//               dozing off sooner and sleepier idling.
+//   bond        (= affectionLevel()) grows with regular interaction, fades
+//               very slowly without it.
+//   loneliness  builds after a couple of minutes with no interaction and
+//               pulls happiness down; the next touch is an "I missed you".
+//   annoyance   short-term: repeated touches in quick succession give less
+//               joy each time and finally a grumpy "enough!".
+// PetBrain reads these to weight idle expressions, pick the touch reaction,
+// set the resting face and the sleep timeout.
+enum class TouchFeeling : uint8_t { HAPPY, LOVED, MISSED_YOU, ANNOYED };
 struct PetReply {
     String spoken;    // full sentence - always set, printed to Serial
     bool isData;      // true for weather/time/date
@@ -35,12 +54,30 @@ public:
     PetReply respond(const String& text);
 
     // Rising-edge events PetBrain forwards here to update counters/mood.
-    void recordTouch();
+    // recordTouch() also says how this particular touch felt, so PetBrain
+    // can react to it.
+    TouchFeeling recordTouch();
     void recordTipped();
     void recordLoudNoise();
+    // Voice commands from the PC link: "voxie" (called by name), "wake",
+    // "sleep", "hey".
+    void recordVoice(const String& kind);
 
-    float affectionLevel() const { return _affection; } // 0..1
+    // Time-based mood drift (and throttled saving). Call every loop.
+    void update(bool asleep);
+
+    float affectionLevel() const { return _affection; } // 0..1, the long-term bond
     float grumpLevel() const { return _grump; }          // 0..1
+    float happiness() const { return _happy; }           // 0..1, right now
+    float happyBaseline() const { return _happyBase; }   // 0..1, where happiness settles
+    float energy() const { return _energy; }             // 0..1
+    float annoyance() const { return _annoy; }           // 0..1, short-term
+    float loneliness() const;                            // 0..1, from time since last interaction
+    uint32_t sleepTimeoutMs() const;                     // idle time before dozing off, by energy
+
+    // One-line "[mood] ..." summary for Serial (also parsed by tools/mic_display.py).
+    void printMood() const;
+    void resetMood();
 
 private:
     Preferences _prefs;
@@ -53,6 +90,13 @@ private:
     uint32_t _noiseCount = 0;
     uint32_t _commandCount = 0;
 
+    float _happy = 0.6f;
+    float _happyBase = 0.55f;
+    float _energy = 1.0f;
+    float _annoy = 0.0f;
+    uint32_t _lastInteractionMs = 0;
+    uint32_t _lastUpdateMs = 0;
+
     bool _dirty = false;
     uint32_t _lastSaveMs = 0;
 
@@ -61,5 +105,7 @@ private:
     void save();
 
     bool tryExtractName(const String& lower, const String& original);
+    void interacted();   // someone paid attention: clears loneliness
+    void nudgeHappy(float amount);
     static float clamp01(float v);
 };

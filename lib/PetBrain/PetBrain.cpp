@@ -27,17 +27,31 @@ void PetBrain::applyExpression(Expression e, float transitionSeconds) {
 }
 
 void PetBrain::wake() {
+    _sleepRequested = false;
     if (_asleep) {
         _asleep = false;
         _face.blinkOnce();
     }
 }
 
-void PetBrain::notifyTouched() {
+TouchFeeling PetBrain::notifyTouched() {
+    const bool wasAsleep = _asleep;
     wake();
-    _mind.recordTouch();
-    _touchedUntilMs = millis() + kTouchedMs;
+    uint32_t duration = kTouchedMs;
+    const TouchFeeling feeling = _mind.recordTouch();
+    switch (feeling) {
+        case TouchFeeling::ANNOYED:    _touchedExpr = Expression::DISGRUNTLED; break;
+        case TouchFeeling::HAPPY:      _touchedExpr = Expression::HAPPY; break;
+        case TouchFeeling::LOVED:      _touchedExpr = Expression::ADORING; break;
+        case TouchFeeling::MISSED_YOU: _touchedExpr = Expression::ADORING; duration = kMissedYouMs; break;
+    }
+    // Woken up while still worn out: groggy rather than delighted.
+    if (wasAsleep && _mind.energy() < 0.25f && _touchedExpr != Expression::DISGRUNTLED) {
+        _touchedExpr = Expression::SLEEPY;
+    }
+    _touchedUntilMs = millis() + duration;
     _lastActivityMs = millis();
+    return feeling;
 }
 
 void PetBrain::notifyTipped(bool isTipped) {
@@ -69,6 +83,15 @@ void PetBrain::notifyWakeWord() {
     wake();
     _attentiveUntilMs = millis() + kAttentiveMs;
     _lastActivityMs = millis();
+}
+
+void PetBrain::notifyGoToSleep() {
+    const uint32_t now = millis();
+    _touchedUntilMs = _answerUntilMs = _attentiveUntilMs = _previewUntilMs = 0;
+    _noiseUntilMs = 0;
+    _fidgetUntilMs = 0;
+    _lastActivityMs = now;
+    _sleepRequested = true;  // update() takes the asleep branch next frame
 }
 
 void PetBrain::notifySpeak(const PetReply& reply) {
@@ -132,6 +155,7 @@ const String& PetBrain::dataCaption() const { return _dataCaption; }
 
 void PetBrain::update() {
     uint32_t now = millis();
+    _mind.update(_asleep);
     _face.setTalking(false);
     // Defaults off every frame; the jamming branch below re-asserts it when
     // that's actually this frame's state, so a higher-priority reaction
@@ -155,7 +179,7 @@ void PetBrain::update() {
     if (now < _touchedUntilMs) {
         // A physical touch should feel immediate; keep a short blend so it
         // still reads as organic rather than as a hard screen cut.
-        applyExpression(Expression::ADORING, 0.08f);
+        applyExpression(_touchedExpr, 0.08f);
         return;
     }
     if (now < _answerUntilMs) {
@@ -164,7 +188,8 @@ void PetBrain::update() {
         return;
     }
     if (now < _attentiveUntilMs) {
-        applyExpression(Expression::SURPRISED, 0.12f);
+        // Called while worn out: a drowsy "hm?" instead of bright attention.
+        applyExpression(_mind.energy() < 0.25f ? Expression::SLEEPY : Expression::SURPRISED, 0.12f);
         return;
     }
     if (_jamming) {
@@ -174,7 +199,8 @@ void PetBrain::update() {
         return;
     }
 
-    if (now - _lastActivityMs > kIdleTimeoutMs) {
+    // A tired pet dozes off sooner (PetMind scales this with energy).
+    if (_sleepRequested || now - _lastActivityMs > _mind.sleepTimeoutMs()) {
         _asleep = true;
         _fidgetUntilMs = 0;
         applyExpression(Expression::SLEEPING, 1.2f);
@@ -201,6 +227,14 @@ const char* PetBrain::currentStateName() const {
     return "idle";
 }
 
+Expression PetBrain::restingExpression() const {
+    // The face it settles into between fidgets follows its mood baseline:
+    // worn out looks sleepy, unhappy or lonely looks sad, otherwise neutral.
+    if (_mind.energy() < 0.2f) return Expression::SLEEPY;
+    if (_mind.happiness() < 0.3f || _mind.loneliness() > 0.7f) return Expression::SAD;
+    return Expression::NEUTRAL;
+}
+
 void PetBrain::updateFidget(uint32_t now) {
     if (_fidgetUntilMs != 0 && now < _fidgetUntilMs) {
         return; // mid-fidget; keep showing whatever it rolled into
@@ -209,31 +243,44 @@ void PetBrain::updateFidget(uint32_t now) {
         _fidgetUntilMs = 0; // fidget just ended, fall through to reconsider
     }
     if (now < _nextFidgetAtMs) {
-        applyExpression(Expression::NEUTRAL, 0.4f);
+        applyExpression(restingExpression(), 0.4f);
         return;
     }
 
-    // A well-treated pet (higher affection) fidgets happy more often; a
-    // frequently shaken/scolded one (higher grump) glances around warily
-    // more often. Neither guarantees a fidget every roll - most rolls just
-    // stay NEUTRAL, so it reads as occasional personality rather than a
-    // constant twitch.
-    uint8_t happyChance = (uint8_t)(10.0f + _mind.affectionLevel() * 20.0f);
-    uint8_t suspiciousChance = (uint8_t)(8.0f + _mind.grumpLevel() * 22.0f);
+    // Fidget odds follow PetMind's live mood: a happy, well-bonded pet
+    // flickers happy/adoring more; a grumpy one glances around warily; a
+    // tired one gets heavy-eyed; a lonely or unhappy one looks sad. Most
+    // rolls still land on the resting face, so it reads as occasional
+    // personality rather than a constant twitch.
+    const float happy = _mind.happiness();
+    const float lonely = _mind.loneliness();
+    const uint8_t happyChance = (uint8_t)(4.0f + happy * 26.0f);
+    const uint8_t adoringChance = (uint8_t)(_mind.affectionLevel() > 0.6f ? happy * 10.0f : 0.0f);
+    const uint8_t suspiciousChance = (uint8_t)(4.0f + _mind.grumpLevel() * 22.0f);
+    const uint8_t sleepyChance = (uint8_t)(2.0f + (1.0f - _mind.energy()) * 22.0f);
+    const uint8_t sadChance = (uint8_t)(lonely * 22.0f + max(0.0f, 0.4f - happy) * 30.0f);
     uint8_t roll = (uint8_t)random(0, 100);
 
     if (roll < happyChance) {
         applyExpression(Expression::HAPPY, 0.4f);
         _fidgetUntilMs = now + 1800;
-    } else if (roll < happyChance + suspiciousChance) {
+    } else if ((roll -= happyChance) < adoringChance) {
+        applyExpression(Expression::ADORING, 0.4f);
+        _fidgetUntilMs = now + 1600;
+    } else if ((roll -= adoringChance) < suspiciousChance) {
         applyExpression(Expression::SUSPICIOUS, 0.4f);
         _fidgetUntilMs = now + 1500;
-    } else if (roll < happyChance + suspiciousChance + 6) {
+    } else if ((roll -= suspiciousChance) < sleepyChance) {
         applyExpression(Expression::SLEEPY, 0.4f);
         _fidgetUntilMs = now + 1300;
+    } else if ((roll -= sleepyChance) < sadChance) {
+        applyExpression(Expression::SAD, 0.5f);
+        _fidgetUntilMs = now + 2000;
     } else {
-        applyExpression(Expression::NEUTRAL, 0.4f);
+        applyExpression(restingExpression(), 0.4f);
     }
 
-    _nextFidgetAtMs = now + (uint32_t)random(4000, 12000);
+    // A tired pet fidgets less often; a lively one more.
+    const float pace = 1.6f - _mind.energy();  // 0.6x .. 1.6x the base gap
+    _nextFidgetAtMs = now + (uint32_t)(random(4000, 12000) * pace);
 }

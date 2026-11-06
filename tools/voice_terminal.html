@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voxie Voice Terminal</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a1210;
+      --panel: #0f1c19;
+      --panel2: #0c1613;
+      --line: #1c332d;
+      --text: #dcece6;
+      --muted: #8aa69c;
+      --mint: #5eead4;
+      --amber: #fbbf24;
+      --red: #fb7185;
+    }
+    * { box-sizing: border-box; }
+    body {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 22px 14px 48px;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 system-ui, sans-serif;
+    }
+    h1 { margin: 0; font-size: 20px; }
+    h2 { margin: 0 0 12px; font-size: 14px; letter-spacing: .07em; text-transform: uppercase; }
+    p { color: var(--muted); }
+    .top, .row, .sample { display: flex; align-items: center; gap: 10px; }
+    .top { justify-content: space-between; margin-bottom: 14px; }
+    .row { flex-wrap: wrap; }
+    .card { margin: 12px 0; padding: 16px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
+    .status { color: var(--muted); font: 12px ui-monospace, monospace; }
+    .status::before { content: "●"; margin-right: 7px; color: #64746e; }
+    .status.on::before { color: var(--mint); }
+    button, select, input {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 8px 11px;
+      background: var(--panel2);
+      color: var(--text);
+      font: inherit;
+    }
+    button { cursor: pointer; border-color: #347b70; color: var(--mint); font-weight: 600; }
+    button:hover:not(:disabled) { background: #153129; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    button.warn { color: var(--amber); border-color: #72591c; }
+    button.stop { color: var(--red); border-color: #743241; }
+    input[type="text"] { flex: 1; min-width: 150px; }
+    label { color: var(--muted); }
+    .meters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0; }
+    .meter { padding: 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; }
+    .meter small { display: block; color: var(--muted); }
+    .meter strong { font: 18px ui-monospace, monospace; }
+    canvas { width: 100%; height: 110px; background: var(--panel2); border-radius: 4px; }
+    .settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .setting { display: grid; gap: 4px; }
+    input[type="range"] { width: 100%; padding: 0; accent-color: var(--mint); }
+    .hint { margin: 8px 0 0; font-size: 12px; }
+    #log { height: 170px; overflow: auto; padding: 10px; background: #08100e; border: 1px solid var(--line); border-radius: 5px; font: 12px/1.55 ui-monospace, monospace; white-space: pre-wrap; }
+    .sample-list { display: grid; gap: 8px; }
+    .sample { flex-wrap: wrap; padding: 9px; background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; }
+    .sample .meta { flex: 1; min-width: 180px; }
+    .sample small { display: block; color: var(--muted); }
+    .sample button { min-height: 32px; padding: 5px 9px; font-size: 12px; }
+    audio { width: 100%; max-width: 260px; height: 32px; }
+    @media (max-width: 560px) {
+      .meters { grid-template-columns: 1fr; }
+      .settings { grid-template-columns: 1fr; }
+      .top { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div><h1>Voxie Voice Terminal</h1><div id="status" class="status">Disconnected</div></div>
+    <div class="row">
+      <button id="connect">Connect to ESP32</button>
+      <button id="stream" disabled>Start mic stream</button>
+      <button id="disconnect" class="stop" disabled>Disconnect</button>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>Live microphone</h2>
+    <canvas id="scope" width="860" height="110" aria-label="Microphone level history"></canvas>
+    <div class="meters">
+      <div class="meter"><small>Input RMS</small><strong id="rms">—</strong></div>
+      <div class="meter"><small>Adaptive room floor</small><strong id="floor">—</strong></div>
+      <div class="meter"><small>Voice threshold</small><strong id="threshold">—</strong></div>
+    </div>
+    <div class="row">
+      <button id="auto" class="warn" disabled>Auto capture: off</button>
+      <label for="label">Sample label</label>
+      <select id="label">
+        <option>Hey Voxie</option>
+        <option>Voxie</option>
+        <option>Wake up</option>
+        <option>Go to sleep</option>
+        <option>Hey</option>
+        <option>General room noise</option>
+        <option>Other speech / TV</option>
+        <option>Clap / sudden noise</option>
+        <option>Custom</option>
+      </select>
+      <input id="customLabel" type="text" placeholder="Custom sample label" disabled>
+      <button id="record" disabled>Record sample</button>
+    </div>
+    <p class="hint">Auto capture marks speech-like clips using a rolling room-noise estimate. Choose “General room noise” and record manually for fans, traffic, silence, or other ambient examples. Set the label before speaking.</p>
+  </section>
+
+  <section class="card">
+    <h2>Adaptive capture</h2>
+    <div class="settings">
+      <label class="setting">Sensitivity: <span id="factorValue">2.2×</span>
+        <input id="factor" type="range" min="1.3" max="5" step="0.1" value="2.2">
+      </label>
+      <label class="setting">Minimum voice level: <span id="minimumValue">180</span>
+        <input id="minimum" type="range" min="50" max="2000" step="10" value="180">
+      </label>
+    </div>
+    <p class="hint">A clip starts when its level is above both the minimum and the adaptive room floor × sensitivity. Quiet windows slowly update the floor. Auto capture is a recorder/VAD aid, not an on-device wake-word detector.</p>
+  </section>
+
+  <section class="card">
+    <h2>Try commands on Voxie</h2>
+    <div class="row">
+      <button data-command="voice voxie" disabled>Voxie / listen</button>
+      <button data-command="voice wake" disabled>Wake up</button>
+      <button data-command="voice sleep" disabled>Go to sleep</button>
+      <button data-command="voice hey" disabled>Hey</button>
+      <button data-command="n" class="warn" disabled>Test noise reaction</button>
+      <button data-command="m" disabled>Toggle mic debug</button>
+    </div>
+    <p class="hint">These buttons send the same commands as the live voice recognizer. This page records labeled samples; it does not itself transcribe speech. For spoken "Hey Voxie" / "wake up" recognition from this ESP32 mic, run <code>tools\mic_display.bat</code>. It listens immediately and recognizes direct "sleep" / "wake up" commands; you can optionally require the wake name in its window.</p>
+  </section>
+
+  <section class="card">
+    <div class="top">
+      <h2>Recorded samples <span id="sampleCount">(0)</span></h2>
+      <button id="clearSamples" class="stop">Clear all</button>
+    </div>
+    <div id="samples" class="sample-list"><p class="hint">No recordings yet. WAV samples stay in this browser tab until downloaded or cleared.</p></div>
+  </section>
+
+  <section class="card">
+    <h2>Serial log</h2>
+    <div id="log" role="log" aria-live="polite"></div>
+  </section>
+
+  <script>
+    (() => {
+      const SAMPLE_RATE = 16000;
+      const status = document.getElementById('status');
+      const connectButton = document.getElementById('connect');
+      const streamButton = document.getElementById('stream');
+      const disconnectButton = document.getElementById('disconnect');
+      const autoButton = document.getElementById('auto');
+      const recordButton = document.getElementById('record');
+      const labelSelect = document.getElementById('label');
+      const customLabel = document.getElementById('customLabel');
+      const log = document.getElementById('log');
+      const sampleList = document.getElementById('samples');
+      const canvas = document.getElementById('scope');
+      const context = canvas.getContext('2d');
+      const levelHistory = new Array(160).fill(0);
+      let port = null;
+      let writer = null;
+      let reader = null;
+      let reading = false;
+      let streaming = false;
+      let bytes = new Uint8Array(0);
+      let textDecoder = new TextDecoder();
+      let textBuffer = '';
+      let floor = 120;
+      let factor = 2.2;
+      let minimum = 180;
+      let autoCapture = false;
+      let active = null;
+      let manualRecording = false;
+      let silenceMs = 0;
+      let preRoll = [];
+      let nextId = 1;
+      const recordings = [];
+
+      function logLine(message) {
+        const line = document.createElement('div');
+        line.textContent = message;
+        log.appendChild(line);
+        while (log.childElementCount > 300) log.firstElementChild.remove();
+        log.scrollTop = log.scrollHeight;
+      }
+
+      function currentLabel() {
+        return labelSelect.value === 'Custom' ? (customLabel.value.trim() || 'Custom') : labelSelect.value;
+      }
+
+      function setConnected(connected) {
+        status.textContent = connected ? `Connected · ${port.getInfo().usbVendorId ? 'USB serial' : 'serial'}` : 'Disconnected';
+        status.classList.toggle('on', connected);
+        connectButton.disabled = connected;
+        streamButton.disabled = !connected;
+        disconnectButton.disabled = !connected;
+        document.querySelectorAll('[data-command]').forEach((button) => { button.disabled = !connected; });
+        recordButton.disabled = !streaming || manualRecording;
+        autoButton.disabled = !streaming;
+      }
+
+      function writeLine(line) {
+        if (!writer) return;
+        logLine(`> ${line}`);
+        return writer.write(new TextEncoder().encode(line + '\n'));
+      }
+
+      function showBoardLine(line) {
+        if (line) logLine(line);
+      }
+
+      function appendText(data) {
+        textBuffer += textDecoder.decode(data, { stream: true });
+        const lines = textBuffer.split('\n');
+        textBuffer = lines.pop();
+        lines.forEach((line) => showBoardLine(line.replace(/\r/g, '').trim()));
+      }
+
+      function parseBytes(data) {
+        const joined = new Uint8Array(bytes.length + data.length);
+        joined.set(bytes);
+        joined.set(data, bytes.length);
+        bytes = joined;
+
+        while (bytes.length) {
+          let sync = -1;
+          for (let i = 0; i + 1 < bytes.length; i++) {
+            if (bytes[i] === 0xa5 && bytes[i + 1] === 0x5a) { sync = i; break; }
+          }
+          if (sync < 0) {
+            const keep = bytes[bytes.length - 1] === 0xa5 ? 1 : 0;
+            appendText(bytes.subarray(0, bytes.length - keep));
+            bytes = bytes.slice(bytes.length - keep);
+            return;
+          }
+          if (sync > 0) appendText(bytes.subarray(0, sync));
+          if (bytes.length < sync + 4) {
+            bytes = bytes.slice(sync);
+            return;
+          }
+          const count = bytes[sync + 2] | (bytes[sync + 3] << 8);
+          if (!count || count > 256) {
+            appendText(bytes.subarray(0, sync + 1));
+            bytes = bytes.slice(sync + 1);
+            continue;
+          }
+          const end = sync + 4 + count * 2;
+          if (bytes.length < end) {
+            bytes = bytes.slice(sync);
+            return;
+          }
+          const view = new DataView(bytes.buffer, bytes.byteOffset + sync + 4, count * 2);
+          const samples = new Int16Array(count);
+          for (let i = 0; i < count; i++) samples[i] = view.getInt16(i * 2, true);
+          acceptAudio(samples);
+          bytes = bytes.slice(end);
+        }
+      }
+
+      function rmsOf(samples) {
+        let sum = 0;
+        for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+        return Math.sqrt(sum / Math.max(1, samples.length));
+      }
+
+      function acceptAudio(samples) {
+        const rms = rmsOf(samples);
+        const duration = samples.length * 1000 / SAMPLE_RATE;
+        const threshold = Math.max(minimum, floor * factor);
+        document.getElementById('rms').textContent = Math.round(rms);
+        document.getElementById('floor').textContent = Math.round(floor);
+        document.getElementById('threshold').textContent = Math.round(threshold);
+        levelHistory.push(Math.min(1, rms / Math.max(500, threshold * 3)));
+        levelHistory.shift();
+        drawScope(threshold);
+
+        const above = rms >= threshold;
+        if (!above && !active && !manualRecording) {
+          floor = floor * 0.985 + Math.min(rms, floor * 1.5) * 0.015;
+        }
+        if (manualRecording) {
+          active.samples.push(samples);
+          active.duration += duration;
+          if (active.duration >= 30000) stopManual();
+          return;
+        }
+        if (!autoCapture) return;
+
+        preRoll.push(samples.slice());
+        while (preRoll.length > 10) preRoll.shift();
+        if (above) {
+          if (!active) {
+            active = { label: currentLabel(), samples: preRoll.map((chunk) => chunk.slice()), duration: preRoll.length * 16 };
+            logLine(`Auto capture started · ${active.label}`);
+          }
+          active.samples.push(samples.slice());
+          active.duration += duration;
+          silenceMs = 0;
+          if (active.duration >= 10000) finishAuto();
+        } else if (active) {
+          active.samples.push(samples.slice());
+          active.duration += duration;
+          silenceMs += duration;
+          if (silenceMs >= 650) finishAuto();
+        }
+      }
+
+      function drawScope(threshold) {
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.strokeStyle = '#1c332d';
+        context.lineWidth = 1;
+        for (let y = 20; y < canvas.height; y += 22) {
+          context.beginPath(); context.moveTo(0, y); context.lineTo(canvas.width, y); context.stroke();
+        }
+        const lineY = canvas.height - Math.min(canvas.height - 4, threshold / 100);
+        context.strokeStyle = '#fbbf24';
+        context.setLineDash([5, 5]);
+        context.beginPath(); context.moveTo(0, lineY); context.lineTo(canvas.width, lineY); context.stroke();
+        context.setLineDash([]);
+        context.strokeStyle = '#5eead4';
+        context.lineWidth = 2;
+        context.beginPath();
+        levelHistory.forEach((value, i) => {
+          const x = i * canvas.width / (levelHistory.length - 1);
+          const y = canvas.height - 4 - value * (canvas.height - 8);
+          if (i === 0) context.moveTo(x, y); else context.lineTo(x, y);
+        });
+        context.stroke();
+      }
+
+      function joinSamples(chunks) {
+        const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+        const joined = new Int16Array(length);
+        let offset = 0;
+        chunks.forEach((chunk) => { joined.set(chunk, offset); offset += chunk.length; });
+        return joined;
+      }
+
+      function wavBlob(samples) {
+        const buffer = new ArrayBuffer(44 + samples.length * 2);
+        const view = new DataView(buffer);
+        const write = (offset, text) => { for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i)); };
+        write(0, 'RIFF'); view.setUint32(4, 36 + samples.length * 2, true);
+        write(8, 'WAVE'); write(12, 'fmt '); view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+        view.setUint32(24, SAMPLE_RATE, true); view.setUint32(28, SAMPLE_RATE * 2, true);
+        view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+        write(36, 'data'); view.setUint32(40, samples.length * 2, true);
+        for (let i = 0; i < samples.length; i++) view.setInt16(44 + i * 2, samples[i], true);
+        return new Blob([buffer], { type: 'audio/wav' });
+      }
+
+      function safeName(text) {
+        return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sample';
+      }
+
+      function addRecording(label, chunks, duration) {
+        const samples = joinSamples(chunks);
+        if (samples.length < SAMPLE_RATE * 0.2) {
+          logLine('Recording discarded: shorter than 0.2 seconds.');
+          return;
+        }
+        const blob = wavBlob(samples);
+        const item = { id: nextId++, label, blob, url: URL.createObjectURL(blob), duration: duration || samples.length * 1000 / SAMPLE_RATE };
+        recordings.unshift(item);
+        renderSamples();
+        logLine(`Saved sample #${item.id} · ${label} · ${(item.duration / 1000).toFixed(1)} s`);
+      }
+
+      function finishAuto() {
+        if (!active) return;
+        const clip = active;
+        active = null;
+        silenceMs = 0;
+        if (clip.duration >= 400) addRecording(clip.label, clip.samples, clip.duration);
+      }
+
+      function stopManual() {
+        if (!manualRecording) return;
+        manualRecording = false;
+        const clip = active;
+        active = null;
+        recordButton.textContent = 'Record sample';
+        recordButton.classList.remove('stop');
+        recordButton.disabled = !streaming;
+        if (clip) addRecording(clip.label, clip.samples, clip.duration);
+      }
+
+      function renderSamples() {
+        document.getElementById('sampleCount').textContent = `(${recordings.length})`;
+        sampleList.replaceChildren();
+        if (!recordings.length) {
+          const empty = document.createElement('p');
+          empty.className = 'hint';
+          empty.textContent = 'No recordings yet. WAV samples stay in this browser tab until downloaded or cleared.';
+          sampleList.appendChild(empty);
+          return;
+        }
+        recordings.forEach((item) => {
+          const row = document.createElement('div');
+          row.className = 'sample';
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          const title = document.createElement('strong');
+          title.textContent = `#${item.id} · ${item.label}`;
+          const sub = document.createElement('small');
+          sub.textContent = `${(item.duration / 1000).toFixed(1)} s · 16 kHz mono PCM`;
+          meta.append(title, sub);
+          const audio = document.createElement('audio');
+          audio.controls = true; audio.src = item.url;
+          const download = document.createElement('a');
+          download.href = item.url;
+          download.download = `${String(item.id).padStart(3, '0')}-${safeName(item.label)}.wav`;
+          download.textContent = 'Download WAV';
+          download.className = 'status';
+          const remove = document.createElement('button');
+          remove.textContent = 'Delete';
+          remove.addEventListener('click', () => {
+            URL.revokeObjectURL(item.url);
+            recordings.splice(recordings.indexOf(item), 1);
+            renderSamples();
+          });
+          row.append(meta, audio, download, remove);
+          sampleList.appendChild(row);
+        });
+      }
+
+      async function readLoop() {
+        reading = true;
+        while (reading && reader) {
+          try {
+            const { value, done } = await reader.read();
+            if (done) break;
+            parseBytes(value);
+          } catch (error) {
+            if (reading) logLine(`Serial read error: ${error.message}`);
+            break;
+          }
+        }
+      }
+
+      async function connect() {
+        if (!('serial' in navigator)) {
+          logLine('Web Serial is unavailable. Open this page in Chrome or Edge.');
+          return;
+        }
+        try {
+          port = await navigator.serial.requestPort();
+          await port.open({ baudRate: 230400 });
+          writer = port.writable.getWriter();
+          reader = port.readable.getReader();
+          setConnected(true);
+          logLine('Serial connected at 230400 baud.');
+          readLoop();
+        } catch (error) {
+          logLine(`Connect failed: ${error.message}`);
+        }
+      }
+
+      async function toggleStream() {
+        if (!streaming) {
+          streaming = true;
+          setConnected(true);
+          streamButton.textContent = 'Stop mic stream';
+          streamButton.classList.add('stop');
+          floor = Math.max(40, Number(document.getElementById('minimum').value) * 0.65);
+          await writeLine('stream on');
+          logLine('Mic stream started. Speak near the ESP32 microphone.');
+        } else {
+          streaming = false;
+          autoCapture = false;
+          if (active && !manualRecording) finishAuto();
+          stopManual();
+          await writeLine('stream off');
+          streamButton.textContent = 'Start mic stream';
+          streamButton.classList.remove('stop');
+          autoButton.textContent = 'Auto capture: off';
+          setConnected(true);
+          logLine('Mic stream stopped.');
+        }
+      }
+
+      async function disconnect() {
+        if (!port) return;
+        try {
+          if (streaming) {
+            streaming = false;
+            autoCapture = false;
+            stopManual();
+            await writeLine('stream off');
+            await new Promise((resolve) => setTimeout(resolve, 80));
+          }
+          reading = false;
+          try { await reader.cancel(); } catch (_) {}
+          try { writer.releaseLock(); } catch (_) {}
+          try { reader.releaseLock(); } catch (_) {}
+          await port.close();
+        } catch (error) {
+          logLine(`Disconnect error: ${error.message}`);
+        }
+        port = null; writer = null; reader = null; streaming = false;
+        streamButton.textContent = 'Start mic stream';
+        streamButton.classList.remove('stop');
+        setDisconnected();
+      }
+
+      function setDisconnected() {
+        status.textContent = 'Disconnected';
+        status.classList.remove('on');
+        connectButton.disabled = false;
+        streamButton.disabled = true;
+        disconnectButton.disabled = true;
+        autoButton.disabled = true;
+        recordButton.disabled = true;
+        document.querySelectorAll('[data-command]').forEach((button) => { button.disabled = true; });
+      }
+
+      connectButton.addEventListener('click', connect);
+      streamButton.addEventListener('click', toggleStream);
+      disconnectButton.addEventListener('click', disconnect);
+      autoButton.addEventListener('click', () => {
+        autoCapture = !autoCapture;
+        if (!autoCapture && active && !manualRecording) finishAuto();
+        autoButton.textContent = `Auto capture: ${autoCapture ? 'on' : 'off'}`;
+        logLine(`Auto capture ${autoCapture ? 'enabled' : 'disabled'}.`);
+      });
+      recordButton.addEventListener('click', () => {
+        if (manualRecording) { stopManual(); return; }
+        autoCapture = false;
+        autoButton.textContent = 'Auto capture: off';
+        if (active) finishAuto();
+        manualRecording = true;
+        active = { label: currentLabel(), samples: [], duration: 0 };
+        recordButton.textContent = 'Stop recording';
+        recordButton.classList.add('stop');
+        recordButton.disabled = false;
+        logLine(`Manual recording started · ${active.label}`);
+      });
+      labelSelect.addEventListener('change', () => { customLabel.disabled = labelSelect.value !== 'Custom'; });
+      document.getElementById('factor').addEventListener('input', (event) => {
+        factor = Number(event.target.value);
+        document.getElementById('factorValue').textContent = `${factor.toFixed(1)}×`;
+      });
+      document.getElementById('minimum').addEventListener('input', (event) => {
+        minimum = Number(event.target.value);
+        document.getElementById('minimumValue').textContent = String(minimum);
+      });
+      document.querySelectorAll('[data-command]').forEach((button) => {
+        button.addEventListener('click', () => writeLine(button.dataset.command));
+      });
+      document.getElementById('clearSamples').addEventListener('click', () => {
+        recordings.forEach((item) => URL.revokeObjectURL(item.url));
+        recordings.length = 0;
+        renderSamples();
+      });
+      window.addEventListener('beforeunload', () => {
+        recordings.forEach((item) => URL.revokeObjectURL(item.url));
+        if (port) port.close();
+      });
+      renderSamples();
+      drawScope(180);
+      logLine('Ready. Connect to the board, then start the mic stream.');
+    })();
+  </script>
+</body>
+</html>

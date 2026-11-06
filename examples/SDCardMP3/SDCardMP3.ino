@@ -15,9 +15,9 @@
 using namespace audio_tools;
 
 // Keep Voxie's existing, known-working MAX98357A wiring.
-constexpr int AMP_BCLK = 5;
-constexpr int AMP_LRC  = 4;
-constexpr int AMP_DIN  = 7;
+constexpr int AMP_BCLK = 13;
+constexpr int AMP_LRC  = 12;
+constexpr int AMP_DIN  = 14;
 
 // Dedicated SD-card SPI bus. These are free pins on the ESP32-S3 DevKitC-1
 // N8R2 and do not collide with the LCD, microphone, touch pad, servo, or amp.

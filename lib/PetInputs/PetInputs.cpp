@@ -8,6 +8,8 @@ constexpr uint32_t kMicSampleRate = 16000;
 // thousands, while a close clap/shout is several thousand or more.
 constexpr float kNoiseFactor = 2.0f;         // a spike must beat floor * this to count
 constexpr int32_t kMinAbsThreshold = 6000;   // ignores ordinary speech/room noise
+constexpr float kAsleepNoiseFactor = 3.5f;
+constexpr int32_t kAsleepMinAbsThreshold = 14000;
 constexpr uint32_t kNoiseCooldownMs = 900;   // ignore further spikes while one event is still ringing
 constexpr float kFloorAlpha = 0.02f;         // how fast the ambient estimate adapts
 } // namespace
@@ -23,8 +25,8 @@ PetInputs::PetInputs(uint8_t touchPin, int micSckPin, int micWsPin, int micSdPin
 
 void PetInputs::begin() {
     // touchRead() needs no pinMode() call on the ESP32 Arduino core.
-    Serial.printf("[touch] GPIO%d ready; active above %u. Raw values will print every 250 ms.\n",
-                  _touchPin, _touchThreshold);
+    Serial.printf("[touch] GPIO%d ready; starting threshold %u, then learned from the pad. "
+                  "Raw values print every 250 ms.\n", _touchPin, (unsigned)_touchThreshold);
 
     i2s_config_t config = {
         .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
@@ -32,10 +34,10 @@ void PetInputs::begin() {
         // INMP441 delivers 24-bit signed data left-justified in a 32-bit
         // frame. updateMic() reduces that to conventional 16-bit PCM.
         .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT, // mic's L/R pin ties to GND
+        .channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT, // verified against the Super Mini's mic channel
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 4,
+        .dma_buf_count = 8,
         .dma_buf_len = 256,
         .use_apll = false,
     };
@@ -50,26 +52,75 @@ void PetInputs::begin() {
                 i2s_set_pin(I2S_NUM_0, &pins) == ESP_OK;
     if (!_micReady) {
         Serial.println("PetInputs: I2S mic init failed - check SD/SCK/WS wiring; loud-noise detection disabled.");
+        return;
+    }
+    _micQueue = xStreamBufferCreate(kMicQueueSamples * sizeof(int32_t), sizeof(int32_t));
+    // Core 0, away from loop() on core 1, so mic capture never waits on it.
+    xTaskCreatePinnedToCore(micTask, "mic", 4096, this, 5, nullptr, 0);
+}
+
+void PetInputs::micTask(void* self) {
+    PetInputs* inputs = static_cast<PetInputs*>(self);
+    static int32_t block[kMicTaskSamples];
+    while (true) {
+        size_t bytesRead = 0;
+        i2s_read(I2S_NUM_0, block, sizeof(block), &bytesRead, portMAX_DELAY);
+        if (bytesRead == 0) continue;
+        if (inputs->_micTap) inputs->_micTap(block, bytesRead / sizeof(int32_t));
+        // Non-blocking: if loop() has fallen far behind, drop rather than stall capture.
+        xStreamBufferSend(inputs->_micQueue, block, bytesRead, 0);
     }
 }
 
 void PetInputs::update() {
-    uint16_t reading = touchRead(_touchPin);
+    const uint32_t reading = touchRead(_touchPin);
+    const uint32_t now = millis();
     // On this ESP32-S3 board and copper-tape pad, touch raises the raw count.
-    // Untouched readings are about 20k; two real touches measured 40k+.
-    bool active = reading > _touchThreshold;
+    // Untouched readings are about 20k; two real touches measured 40k+. Both
+    // drift with the pad, wiring, humidity and who's touching, so instead of
+    // a fixed threshold the pad's resting level and a typical touch's rise
+    // above it are learned as it runs. The constructor's threshold only
+    // seeds the first guess.
+    if (_touchBaseline <= 0.0f) {
+        _touchBaseline = reading;
+        _touchStrength = max(kMinTouchRise * 2.0f, 2.0f * ((float)_touchThreshold - reading));
+    }
+    const float pressAt = _touchBaseline + max(kMinTouchRise, 0.5f * _touchStrength);
+    const float releaseAt = _touchBaseline + max(kMinTouchRise * 0.6f, 0.3f * _touchStrength);
+    bool active = _touchActive ? reading > releaseAt : reading > pressAt;  // hysteresis
+
+    if (active) {
+        if (!_touchActive) { _touchStartMs = now; _touchPeak = 0; }
+        _touchPeak = max(_touchPeak, reading);
+        // Held "on" far longer than any touch: something is resting on the
+        // pad or the reading shifted. Treat that as the new resting level.
+        if (now - _touchStartMs > kStuckTouchMs) {
+            _touchBaseline = reading;
+            active = false;
+            Serial.printf("[touch] stuck high for %lus - re-learned resting level %u\n",
+                          (unsigned long)(kStuckTouchMs / 1000), reading);
+        }
+    } else if (_touchActive && _touchPeak > _touchBaseline) {
+        // Just released: learn how strong a real touch is on this pad.
+        _touchStrength = 0.7f * _touchStrength + 0.3f * (_touchPeak - _touchBaseline);
+    } else if (reading < _touchBaseline + 0.25f * _touchStrength) {
+        // Idle: follow slow drift in the resting level.
+        _touchBaseline += (reading - _touchBaseline) * 0.005f;
+    }
+    _touchThreshold = (uint32_t)(_touchBaseline + max(kMinTouchRise, 0.5f * _touchStrength));
+
     _touchEdge = active && !_touchActive;
     const bool released = !active && _touchActive;
     _touchActive = active;
 
-    const uint32_t now = millis();
     if (_touchEdge) {
-        Serial.printf("[touch] TOUCHED  raw=%u  threshold=%u\n", reading, _touchThreshold);
+        Serial.printf("[touch] TOUCHED  raw=%u  threshold=%u\n", reading, (unsigned)_touchThreshold);
     } else if (released) {
-        Serial.printf("[touch] released raw=%u\n", reading);
+        Serial.printf("[touch] released raw=%u  peak=%u  learned rise=%.0f\n", reading,
+                      (unsigned)_touchPeak, _touchStrength);
     } else if (now - _lastTouchTelemetryMs >= 250) {
-        Serial.printf("[touch] raw=%u  threshold=%u  state=%s\n", reading, _touchThreshold,
-                      active ? "TOUCHED" : "idle");
+        Serial.printf("[touch] raw=%u  rest=%.0f  threshold=%u  state=%s\n", reading, _touchBaseline,
+                      (unsigned)_touchThreshold, active ? "TOUCHED" : "idle");
         _lastTouchTelemetryMs = now;
     }
 
@@ -79,10 +130,9 @@ void PetInputs::update() {
 void PetInputs::updateMic() {
     if (!_micReady) { _rawSampleCount = 0; return; }
 
-    size_t bytesRead = 0;
-    // ticks_to_wait = 0: never blocks the main loop, just grabs whatever the
-    // DMA buffer already has queued since the last poll.
-    i2s_read(I2S_NUM_0, _rawBuf, sizeof(_rawBuf), &bytesRead, 0);
+    // Never blocks the main loop: just takes whatever the mic task queued
+    // since the last poll.
+    const size_t bytesRead = xStreamBufferReceive(_micQueue, _rawBuf, sizeof(_rawBuf), 0);
     size_t samples = bytesRead / sizeof(int32_t);
     _rawSampleCount = samples;  // exposed via rawSamples()/rawSampleCount() for other mic consumers
     if (samples == 0) return;
@@ -114,7 +164,9 @@ void PetInputs::updateMic() {
     uint32_t now = millis();
     if (now < _noiseCooldownUntilMs) return; // still riding out the same loud event
 
-    float threshold = max((float)kMinAbsThreshold, _noiseFloor * kNoiseFactor);
+    const float threshold = _asleep
+        ? max((float)kAsleepMinAbsThreshold, _noiseFloor * kAsleepNoiseFactor)
+        : max((float)kMinAbsThreshold, _noiseFloor * kNoiseFactor);
     if ((float)peak > threshold) {
         _pendingLoudNoise = true;
         _noiseCooldownUntilMs = now + kNoiseCooldownMs;
@@ -135,6 +187,7 @@ void PetInputs::suppressLoudNoise(uint32_t durationMs) {
     _pendingLoudNoise = false;
     uint32_t until = millis() + durationMs;
     if (until > _noiseCooldownUntilMs) _noiseCooldownUntilMs = until;
+    if (until > _selfSoundUntilMs) _selfSoundUntilMs = until;
 }
 
 void PetInputs::simulateToggleTip() { _simulatedTipped = !_simulatedTipped; }

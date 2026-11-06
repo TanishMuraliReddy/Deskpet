@@ -50,6 +50,22 @@ constexpr uint8_t arrayLen(const T& arr) {
     return sizeof(arr) / sizeof(arr[0]);
 }
 
+// Mood dynamics (all times in seconds).
+constexpr float kHappyRelaxS = 120.0f;       // happiness settles back to baseline over ~2 min
+constexpr float kBaselineFollowS = 3600.0f;  // baseline follows actual happiness over ~1 h
+constexpr float kBaselineMin = 0.2f, kBaselineMax = 0.85f;
+constexpr float kEnergyDrainS = 1800.0f;     // full -> empty awake in ~30 min
+constexpr float kEnergyRecoverS = 300.0f;    // empty -> full asleep in ~5 min
+constexpr float kAnnoyDecayS = 20.0f;
+constexpr float kGrumpDecayS = 1800.0f;      // grump fades toward kGrumpRest over ~30 min
+constexpr float kGrumpRest = 0.1f;
+constexpr float kBondDecayS = 6.0f * 3600.0f;  // bond fades toward kBondRest over hours
+constexpr float kBondRest = 0.3f;
+constexpr float kLonelyAfterS = 120.0f;      // no interaction for 2 min starts loneliness...
+constexpr float kLonelyFullS = 600.0f;       // ...full after another 10
+constexpr float kLonelySadS = 600.0f;        // full loneliness drains happiness at this rate
+constexpr uint32_t kSleepMinMs = 15000, kSleepMaxMs = 120000;
+
 } // namespace
 
 float PetMind::clamp01(float v) {
@@ -67,8 +83,72 @@ void PetMind::begin() {
     _tipCount = _prefs.getUInt("tip", 0);
     _noiseCount = _prefs.getUInt("noise", 0);
     _commandCount = _prefs.getUInt("cmds", 0);
+    _happyBase = _prefs.getFloat("happyBase", 0.55f);
+    _happy = _prefs.getFloat("happy", _happyBase);
+    _energy = _prefs.getFloat("energy", 1.0f);
     _dirty = false;
     _lastSaveMs = millis();
+    _lastInteractionMs = _lastUpdateMs = millis();
+}
+
+float PetMind::loneliness() const {
+    const float idleS = (millis() - _lastInteractionMs) / 1000.0f;
+    return clamp01((idleS - kLonelyAfterS) / kLonelyFullS);
+}
+
+uint32_t PetMind::sleepTimeoutMs() const {
+    return kSleepMinMs + (uint32_t)(_energy * (kSleepMaxMs - kSleepMinMs));
+}
+
+void PetMind::interacted() { _lastInteractionMs = millis(); }
+
+void PetMind::nudgeHappy(float amount) {
+    _happy = clamp01(_happy + amount);
+    markDirty();
+}
+
+void PetMind::update(bool asleep) {
+    const uint32_t now = millis();
+    if (now - _lastUpdateMs < 1000) return;
+    const float dt = (now - _lastUpdateMs) / 1000.0f;
+    _lastUpdateMs = now;
+
+    _happy += (_happyBase - _happy) * min(1.0f, dt / kHappyRelaxS);
+    if (!asleep) {
+        // Asleep it isn't missing anyone, and a night left alone shouldn't
+        // teach it to be miserable - both only run while it's awake.
+        _happy -= loneliness() * dt / kLonelySadS;
+        // The adaptive part: where happiness settles is itself learned from
+        // how the pet has actually been feeling.
+        _happyBase += (clamp01(_happy) - _happyBase) * min(1.0f, dt / kBaselineFollowS);
+        _happyBase = constrain(_happyBase, kBaselineMin, kBaselineMax);
+    }
+    _happy = clamp01(_happy);
+
+    _energy = clamp01(_energy + (asleep ? dt / kEnergyRecoverS : -dt / kEnergyDrainS));
+    _annoy *= expf(-dt / kAnnoyDecayS);
+    _grump += (kGrumpRest - _grump) * min(1.0f, dt / kGrumpDecayS);
+    _affection += (kBondRest - _affection) * min(1.0f, dt / kBondDecayS);
+    // Slow drift alone only needs saving now and then (flash wear); events
+    // mark the state dirty and go through the usual 30 s throttle.
+    if (now - _lastSaveMs > 300000) save();
+    else maybeSave();
+}
+
+void PetMind::printMood() const {
+    Serial.printf("[mood] happy=%.2f base=%.2f energy=%.2f bond=%.2f grump=%.2f lonely=%.2f annoy=%.2f\n",
+                  _happy, _happyBase, _energy, _affection, _grump, loneliness(), _annoy);
+}
+
+void PetMind::resetMood() {
+    _happyBase = 0.55f;
+    _happy = _happyBase;
+    _energy = 1.0f;
+    _affection = 0.5f;
+    _grump = 0.2f;
+    _annoy = 0.0f;
+    interacted();
+    save();
 }
 
 void PetMind::markDirty() { _dirty = true; }
@@ -87,22 +167,45 @@ void PetMind::save() {
     _prefs.putUInt("tip", _tipCount);
     _prefs.putUInt("noise", _noiseCount);
     _prefs.putUInt("cmds", _commandCount);
+    _prefs.putFloat("happyBase", _happyBase);
+    _prefs.putFloat("happy", _happy);
+    _prefs.putFloat("energy", _energy);
     _dirty = false;
     _lastSaveMs = millis();
 }
 
-void PetMind::recordTouch() {
+TouchFeeling PetMind::recordTouch() {
     _touchCount++;
-    _affection = clamp01(_affection + 0.05f);
-    _grump = clamp01(_grump - 0.02f);
+    const float lonely = loneliness();
+    // Habituation: each touch in a quick burst is worth less than the last.
+    const float novelty = 1.0f - _annoy;
+    TouchFeeling feeling;
+    if (_annoy > 0.75f) {
+        feeling = TouchFeeling::ANNOYED;
+        nudgeHappy(-0.03f);
+        _grump = clamp01(_grump + 0.03f);
+    } else {
+        nudgeHappy(0.12f * novelty * (0.6f + _affection) + 0.15f * lonely);
+        _affection = clamp01(_affection + 0.02f * novelty);
+        _grump = clamp01(_grump - 0.02f);
+        feeling = lonely > 0.3f ? TouchFeeling::MISSED_YOU
+                : _affection > 0.6f ? TouchFeeling::LOVED : TouchFeeling::HAPPY;
+    }
+    _annoy = clamp01(_annoy + 0.22f);
+    _energy = clamp01(_energy + 0.03f);
+    interacted();
     markDirty();
     maybeSave();
+    return feeling;
 }
 
 void PetMind::recordTipped() {
     _tipCount++;
     _grump = clamp01(_grump + 0.08f);
     _affection = clamp01(_affection - 0.03f);
+    _annoy = clamp01(_annoy + 0.3f);
+    nudgeHappy(-0.15f);
+    interacted();
     markDirty();
     maybeSave();
 }
@@ -110,6 +213,23 @@ void PetMind::recordTipped() {
 void PetMind::recordLoudNoise() {
     _noiseCount++;
     _grump = clamp01(_grump + 0.02f);
+    nudgeHappy(-0.05f);
+    markDirty();
+    maybeSave();
+}
+
+void PetMind::recordVoice(const String& kind) {
+    if (kind == "voxie") {
+        // Being called by name is attention in itself.
+        nudgeHappy(0.04f);
+        _affection = clamp01(_affection + 0.01f);
+    } else if (kind == "hey") {
+        nudgeHappy(0.08f + 0.1f * loneliness());
+        _affection = clamp01(_affection + 0.01f);
+    } else if (kind == "wake") {
+        _energy = clamp01(_energy + 0.15f);
+    }
+    interacted();
     markDirty();
     maybeSave();
 }
@@ -145,6 +265,7 @@ PetReply PetMind::respond(const String& textIn) {
     lower.toLowerCase();
 
     _commandCount++;
+    interacted();
     markDirty();
 
     if (tryExtractName(lower, original)) {
@@ -165,12 +286,14 @@ PetReply PetMind::respond(const String& textIn) {
     if (containsAny(lower, kPraiseWords, arrayLen(kPraiseWords))) {
         _affection = clamp01(_affection + 0.10f);
         _grump = clamp01(_grump - 0.05f);
+        nudgeHappy(0.12f);
         maybeSave();
         return chatReply(pickTemplate(kPraiseTemplates, arrayLen(kPraiseTemplates), _userName));
     }
     if (containsAny(lower, kScoldWords, arrayLen(kScoldWords))) {
         _grump = clamp01(_grump + 0.10f);
         _affection = clamp01(_affection - 0.05f);
+        nudgeHappy(-0.15f);
         maybeSave();
         return chatReply(pickTemplate(kScoldTemplates, arrayLen(kScoldTemplates), _userName));
     }
@@ -181,8 +304,10 @@ PetReply PetMind::respond(const String& textIn) {
         return chatReply(pickTemplate(kIdentityTemplates, arrayLen(kIdentityTemplates), _userName));
     }
     if (containsAny(lower, kMoodWords, arrayLen(kMoodWords))) {
-        if (_affection - _grump > 0.3f) return chatReply("I'm feeling great, especially around you.");
-        if (_grump - _affection > 0.3f) return chatReply("Honestly? A little grumpy right now.");
+        if (_energy < 0.2f) return chatReply("Sleepy... so sleepy.");
+        if (loneliness() > 0.5f) return chatReply("A bit lonely, honestly. Glad you're here.");
+        if (_happy > 0.7f) return chatReply("I'm feeling great, especially around you.");
+        if (_grump > 0.5f || _happy < 0.3f) return chatReply("Honestly? A little grumpy right now.");
         return chatReply("I'm doing okay!");
     }
     // Weather/time/date are a single glanceable fact, so a successful fetch

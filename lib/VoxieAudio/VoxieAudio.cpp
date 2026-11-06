@@ -86,17 +86,12 @@ VoxieAudio::VoxieAudio(int bclkPin, int lrcPin, int dinPin, int ampEnablePin)
     : _bclkPin(bclkPin), _lrcPin(lrcPin), _dinPin(dinPin),
       _ampEnablePin(ampEnablePin) {}
 
-void VoxieAudio::begin() {
-    if (_ampEnablePin >= 0) {
-        pinMode(_ampEnablePin, OUTPUT);
-        digitalWrite(_ampEnablePin, LOW);
-    }
-
+bool VoxieAudio::startI2s(int bclkPin, int lrcPin, int dinPin) {
     auto cfg = robotI2s.defaultConfig(TX_MODE);
     cfg.port_no = I2S_NUM_1;
-    cfg.pin_bck = _bclkPin;
-    cfg.pin_ws = _lrcPin;
-    cfg.pin_data = _dinPin;
+    cfg.pin_bck = bclkPin;
+    cfg.pin_ws = lrcPin;
+    cfg.pin_data = dinPin;
     cfg.sample_rate = kSampleRate;
     cfg.channels = 2;
     cfg.bits_per_sample = 16;
@@ -104,7 +99,65 @@ void VoxieAudio::begin() {
     cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
     cfg.buffer_count = 8;
     cfg.buffer_size = 256;
-    if (!robotI2s.begin(cfg)) {
+    return robotI2s.begin(cfg);
+}
+
+void VoxieAudio::writeTone(float hz, uint32_t ms, float level) {
+    int16_t frames[kFramesPerChunk * 2];
+    const uint32_t total = ms * kSampleRate / 1000;
+    float phase = 0.0f;
+    for (uint32_t base = 0; base < total; base += kFramesPerChunk) {
+        const uint32_t n = min(kFramesPerChunk, total - base);
+        for (uint32_t i = 0; i < n; ++i) {
+            phase += kPi2 * hz / kSampleRate;
+            if (phase >= kPi2) phase -= kPi2;
+            const int16_t s = hz > 0 ? (int16_t)(sinf(phase) * level * 32760.0f) : 0;
+            frames[i * 2] = frames[i * 2 + 1] = s;
+        }
+        robotI2s.write(reinterpret_cast<const uint8_t*>(frames), n * sizeof(int16_t) * 2);
+    }
+}
+
+void VoxieAudio::runPinTest() {
+    // Bring-up aid for "no sound": tries every arrangement of the three amp
+    // signal wires. Arrangement N plays N beeps; the one you hear tells you
+    // how the wires are actually connected.
+    const int pins[3] = {_bclkPin, _lrcPin, _dinPin};
+    const uint8_t orders[6][3] = {{0, 1, 2}, {1, 0, 2}, {0, 2, 1}, {2, 1, 0}, {1, 2, 0}, {2, 0, 1}};
+    setAmpEnabled(true);
+    for (uint8_t t = 0; t < 6; ++t) {
+        const int b = pins[orders[t][0]], l = pins[orders[t][1]], d = pins[orders[t][2]];
+        robotI2s.end();
+        Serial.printf("[audio] pintest %u: %u beep(s) with BCLK=%d LRC=%d DIN=%d\n", t + 1, t + 1, b, l, d);
+        if (!startI2s(b, l, d)) { Serial.println("[audio] pintest: I2S start failed"); continue; }
+        for (uint8_t i = 0; i <= t; ++i) {
+            writeTone(880.0f, 160, 0.45f);
+            writeTone(0.0f, 180, 0.0f);
+        }
+        writeTone(0.0f, 1200, 0.0f);
+    }
+    robotI2s.end();
+    _ready = startI2s(_bclkPin, _lrcPin, _dinPin);
+    setAmpEnabled(false);
+    Serial.printf("[audio] pintest done - restored BCLK=%d LRC=%d DIN=%d\n", _bclkPin, _lrcPin, _dinPin);
+}
+
+void VoxieAudio::playLongTone() {
+    // 3 s steady tone: time to put a multimeter / ear on the amp and wiring.
+    if (!_ready || !startOutput()) return;
+    Serial.println("[audio] playing longtone 3000ms");
+    if (_playHook) _playHook(3000);
+    writeTone(440.0f, 3000, 0.4f * _volumePercent / 100.0f);
+    silenceAndStopOutput();
+}
+
+void VoxieAudio::begin() {
+    if (_ampEnablePin >= 0) {
+        pinMode(_ampEnablePin, OUTPUT);
+        digitalWrite(_ampEnablePin, LOW);
+    }
+
+    if (!startI2s(_bclkPin, _lrcPin, _dinPin)) {
         _initError = "I2S1 output setup failed";
         Serial.println("[audio] I2S1 robot-sound setup FAILED.");
         return;
@@ -132,7 +185,7 @@ bool VoxieAudio::startOutput() {
 }
 
 void VoxieAudio::silenceAndStopOutput() {
-    // I2S remains configured. If SD_MODE is wired to GPIO21, this also
+    // I2S remains configured. If SD_MODE is wired to AMP_SD, this also
     // removes idle hiss by placing the MAX98357A in hardware shutdown.
     setAmpEnabled(false);
     _outputRunning = false;
@@ -154,8 +207,13 @@ void VoxieAudio::playRobotSound(RobotSound sound) {
     size_t count = 0;
     const char* label = "unknown";
     patternFor(sound, pattern, count, label);
+    uint32_t durationMs = 20;
+    for (size_t i = 0; i < count; ++i) durationMs += pattern[i].durationMs;
+    Serial.printf("[audio] playing %s %lums\n", label, (unsigned long)durationMs);
+    if (_playHook) _playHook(durationMs);
     _playing = true;
-    const float userLevel = _volumePercent / 100.0f;
+    const float userLevel = _volumePercent / 100.0f * _moodLevel;
+    const float pitch = sound == RobotSound::TEST_TONE ? 1.0f : _moodPitch;
     int16_t frames[kFramesPerChunk * 2];
 
     for (size_t segmentIndex = 0; segmentIndex < count; ++segmentIndex) {
@@ -168,7 +226,7 @@ void VoxieAudio::playRobotSound(RobotSound sound) {
             for (uint32_t i = 0; i < frameCount; ++i) {
                 const float progress = (float)(base + i) / (float)totalFrames;
                 const float envelope = min(1.0f, min(progress * 18.0f, (1.0f - progress) * 18.0f));
-                const float frequency = segment.startHz + (segment.endHz - segment.startHz) * progress;
+                const float frequency = (segment.startHz + (segment.endHz - segment.startHz) * progress) * pitch;
                 phase += kPi2 * frequency / kSampleRate;
                 if (phase >= kPi2) phase -= kPi2;
                 wobblePhase += kPi2 * segment.wobbleHz / kSampleRate;
@@ -224,6 +282,11 @@ bool VoxieAudio::playNumber(uint8_t number) {
 void VoxieAudio::setVolumePercent(uint8_t percent) {
     _volumePercent = min(percent, (uint8_t)100);
     Serial.printf("[audio] robot-sound volume=%u%%\n", _volumePercent);
+}
+
+void VoxieAudio::setMoodVoice(float pitch, float level) {
+    _moodPitch = constrain(pitch, 0.7f, 1.3f);
+    _moodLevel = constrain(level, 0.3f, 1.0f);
 }
 
 void VoxieAudio::playTestTone() { playRobotSound(RobotSound::TEST_TONE); }

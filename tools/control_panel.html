@@ -222,6 +222,22 @@
     </div>
   </div>
 
+  <div class="card" id="soundCard" style="display: none;">
+    <div class="head"><div class="head-title">Sound Board</div><div class="status-text">speaker test</div></div>
+    <div class="face-note">Press a sound to play it on Voxie's speaker. Hear nothing at all? Try Long tone (3 s), then Wire test: it plays 1 to 6 beeps, one count per way the amp's BCLK/LRC/DIN wires could be arranged, and the log shows which count used which pins.</div>
+    <div class="face-gallery" id="soundBoard">
+      <button data-sound="cute">Cute</button><button data-sound="yes">Yes</button><button data-sound="no">No</button>
+      <button data-sound="scared">Scared</button><button data-sound="shy">Shy</button><button data-sound="wakeup">Wake up</button>
+      <button data-sound="sleepy">Sleepy</button><button data-sound="angry">Angry</button><button data-sound="tone">Short tone</button>
+      <button data-sound="longtone">Long tone (3 s)</button><button data-sound="pintest">Wire test (1-6 beeps)</button><button data-sound="status">Audio status</button>
+    </div>
+    <div class="face-note" style="display: flex; align-items: center; gap: 10px; padding-bottom: 18px;">
+      <label for="volume">Volume</label>
+      <input type="range" id="volume" min="0" max="100" step="5" value="100" style="flex: 1;" />
+      <span id="volumeValue">100%</span>
+    </div>
+  </div>
+
   <div class="card" id="unsupportedCard" style="display: none;">
     <div class="empty-state">
       <b>Web Serial isn't available in this browser.</b><br />
@@ -261,6 +277,7 @@ function setConnected(on) {
   connectArea.style.display = on ? 'none' : 'grid';
   mainCard.style.display = on ? 'block' : 'none';
   galleryCard.style.display = on ? 'block' : 'none';
+  document.getElementById('soundCard').style.display = on ? 'block' : 'none';
 }
 
 async function sendLine(cmd) {
@@ -370,6 +387,15 @@ document.querySelectorAll('#faceGallery button').forEach((button) => {
     sendLine('face ' + button.dataset.face);
   });
 });
+document.querySelectorAll('#soundBoard button').forEach((button) => {
+  button.addEventListener('click', () => sendLine('audio ' + button.dataset.sound));
+});
+const volumeSlider = document.getElementById('volume');
+volumeSlider.addEventListener('input', () => {
+  document.getElementById('volumeValue').textContent = volumeSlider.value + '%';
+});
+// Only send once the slider is let go, not on every step of the drag.
+volumeSlider.addEventListener('change', () => sendLine('audio vol ' + volumeSlider.value));
 document.getElementById('btnSend').addEventListener('click', () => {
   const text = chatInput.value.trim();
   if (!text) return;

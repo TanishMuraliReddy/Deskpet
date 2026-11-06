@@ -23,7 +23,9 @@ public:
     void begin();
     void update(); // call every loop after feeding in this frame's sensor events
 
-    void notifyTouched();
+    // Returns how the touch felt (PetMind's TouchFeeling), so main.cpp can
+    // pick a matching sound.
+    TouchFeeling notifyTouched();
     void notifyTipped(bool isTipped); // call every loop with the current reading
     void notifyLoudNoise();
     void notifySpeak(const PetReply& reply); // starts an "answering" reaction
@@ -33,6 +35,11 @@ public:
     // look. Ranks above jamming (a wake word interrupts a jam) but below
     // being tipped/startled/touched/answering.
     void notifyWakeWord();
+
+    // Voice "go to sleep" command: drops any timed reaction and falls
+    // asleep right away instead of waiting out the idle timeout. Any later
+    // touch/noise/wake word wakes it as usual.
+    void notifyGoToSleep();
 
     // Music/rhythm reaction (see BeatDetector). notifyMusicPlaying() is a
     // continuous state, like notifyTipped() - call every loop with the
@@ -96,6 +103,8 @@ private:
     Expression _noiseExpr;
 
     uint32_t _touchedUntilMs;
+    Expression _touchedExpr = Expression::ADORING;  // picked per touch from PetMind's TouchFeeling
+    bool _sleepRequested = false;                   // voice "go to sleep": doze off now
 
     uint32_t _attentiveUntilMs;  // wake-word reaction window
 
@@ -120,13 +129,14 @@ private:
     Expression _lastApplied;
     bool _hasApplied;
 
-    static const uint32_t kIdleTimeoutMs = 30000;
     static const uint32_t kNoiseReactionMs = 2200;
     static const uint32_t kTouchedMs = 2000;
+    static const uint32_t kMissedYouMs = 3500;    // a lonely pet savors the touch longer
     static const uint32_t kAttentiveMs = 1800;
     static const uint32_t kTipEventWindowMs = 4000;
     static const uint32_t kDataRevealDelayMs = 220; // lets the eyes visibly finish closing first
     void applyExpression(Expression e, float transitionSeconds);
     void wake();
     void updateFidget(uint32_t now);
+    Expression restingExpression() const;
 };
